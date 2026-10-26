@@ -173,6 +173,9 @@ export class PrintJob {
   fileName: string;
 
   @Column({ type: "varchar", nullable: true })
+  assignedTo: string | null;
+
+  @Column({ type: "varchar", nullable: true })
   fileStorageId: string | null; // ID in file storage system
 
   @Column({ type: "varchar", nullable: true })

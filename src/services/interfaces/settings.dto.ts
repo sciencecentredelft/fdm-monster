@@ -12,6 +12,17 @@ import {
   wizardUpdateSchema,
 } from "@/services/validators/settings-service.validation";
 
+export interface GridStatusColors {
+  ready: string;
+  printing: string;
+  paused: string;
+  offline: string;
+  connecting: string;
+  error: string;
+  disabled: string;
+  maintenance: string;
+}
+
 export interface ServerSettingsDto {
   sentryDiagnosticsEnabled: boolean;
   registration: boolean;
@@ -20,7 +31,13 @@ export interface ServerSettingsDto {
   experimentalBambuSupport: boolean;
   experimentalPrusaLinkSupport: boolean;
   advancedFileListEnabled?: boolean;
-  advancedFileListColumns?: { size: boolean; startedAt: boolean };
+  advancedFileListColumns?: { size: boolean; startedAt: boolean; assignedTo?: boolean };
+  printAssignmentEnabled?: boolean;
+  showPrintAssigneeOnGrid?: boolean;
+  checkPrinterStatusBeforePrint?: boolean;
+  gridStatusColorsEnabled?: boolean;
+  floorGridLockEnabled?: boolean;
+  gridStatusColors?: GridStatusColors;
 }
 
 export type WizardSettingsDto = z.infer<typeof wizardUpdateSchema>;

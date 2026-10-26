@@ -10,11 +10,16 @@ import { authenticate, authorizeRoles } from "@/middleware/authenticate";
 import { ROLES } from "@/constants/authorization.constants";
 import { BatchCallService } from "@/services/core/batch-call.service";
 import type { Request, Response } from "express";
+import { SettingsStore } from "@/state/settings.store";
+import { validatePrintAssignment } from "./validation/print-assignment.validation";
 
 @route(AppConstants.apiRoute + "/batch")
 @before([authenticate(), authorizeRoles([ROLES.ADMIN, ROLES.OPERATOR])])
 export class BatchCallController {
-  constructor(private readonly batchCallService: BatchCallService) {}
+  constructor(
+    private readonly batchCallService: BatchCallService,
+    private readonly settingsStore: SettingsStore,
+  ) {}
 
   @POST()
   @route("/connect/usb")
@@ -43,13 +48,18 @@ export class BatchCallController {
   @POST()
   @route("/reprint/execute")
   async batchReprintFiles(req: Request, res: Response) {
-    const { prints } = await validateInput(req.body, executeBatchRePrinterSchema);
-    const files = await this.batchCallService.batchReprintCalls(prints);
+    const { prints, assignedTo: inputAssignedTo } = await validateInput(req.body, executeBatchRePrinterSchema);
+    const assignedTo = await validatePrintAssignment(
+      this.settingsStore.getServerSettings().printAssignmentEnabled,
+      inputAssignedTo,
+    );
+    const files = await this.batchCallService.batchReprintCalls(prints, assignedTo);
     res.send(files);
   }
 
   @POST()
   @route("/toggle-enabled")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async batchTogglePrintersEnabled(req: Request, res: Response) {
     const { printerIds, enabled } = await validateInput(req.body, batchPrintersEnabledSchema);
     const results = await this.batchCallService.batchTogglePrintersEnabled(printerIds, enabled);

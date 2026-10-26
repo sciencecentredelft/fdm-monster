@@ -1,15 +1,59 @@
 import type { Request, Response } from "express";
 import { FloorStore } from "@/state/floor.store";
-import { PERMS } from "@/constants/authorization.constants";
+import { PERMS, ROLES } from "@/constants/authorization.constants";
 import { AppConstants } from "@/server.constants";
-import { before, DELETE, GET, PATCH, POST, route } from "awilix-express";
-import { authenticate, permission } from "@/middleware/authenticate";
+import { before, DELETE, GET, PATCH, POST, PUT, route } from "awilix-express";
+import { authenticate, authorizeRoles, permission } from "@/middleware/authenticate";
 import { ParamId } from "@/middleware/param-converter.middleware";
+import { validateInput } from "@/handlers/validators";
+import { floorGridPasswordSchema, floorGridUnlockSchema } from "@/services/validators/floor-service.validation";
+import { demoUserNotAllowed } from "@/middleware/demo.middleware";
+import { SettingsStore } from "@/state/settings.store";
+import { BadRequestException } from "@/exceptions/runtime.exceptions";
+
+const unlockAttempts = new Map<string, { count: number; expiresAt: number }>();
 
 @route(AppConstants.apiRoute + "/floor")
 @before([authenticate()])
 export class FloorController {
-  constructor(private readonly floorStore: FloorStore) {}
+  constructor(
+    private readonly floorStore: FloorStore,
+    private readonly settingsStore: SettingsStore,
+  ) {}
+
+  @PUT()
+  @route("/:id/grid-password")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed, ParamId("id")])
+  async setGridPassword(req: Request, res: Response) {
+    if (!this.settingsStore.getServerSettings().floorGridLockEnabled) {
+      throw new BadRequestException("Enable floor grid locks in Quality of Life settings first");
+    }
+    const { password } = await validateInput(req.body, floorGridPasswordSchema);
+    res.send(await this.floorStore.setGridPassword(req.local.id, password));
+  }
+
+  @POST()
+  @route("/:id/grid-unlock")
+  @before([permission(PERMS.Floors.Get), ParamId("id")])
+  async unlockGrid(req: Request, res: Response) {
+    const { password } = await validateInput(req.body, floorGridUnlockSchema);
+    const now = Date.now();
+    for (const [key, attempt] of unlockAttempts) {
+      if (attempt.expiresAt <= now) unlockAttempts.delete(key);
+    }
+    const key = `${req.ip}:${req.local.id}`;
+    const attempt = unlockAttempts.get(key) ?? { count: 0, expiresAt: now + 60000 };
+    if (attempt.count >= 5) {
+      res.setHeader("Retry-After", Math.ceil((attempt.expiresAt - now) / 1000));
+      res.status(429).send({ message: "Too many password attempts. Wait a minute and try again." });
+      return;
+    }
+    attempt.count++;
+    unlockAttempts.set(key, attempt);
+    const result = await this.floorStore.verifyGridPassword(req.local.id, password);
+    if (result.unlocked) unlockAttempts.delete(key);
+    res.send(result);
+  }
 
   @GET()
   @route("/")

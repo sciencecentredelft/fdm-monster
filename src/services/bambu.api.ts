@@ -260,7 +260,7 @@ export class BambuApi implements IPrinterApi {
     throw new Error("Method not implemented");
   }
 
-  async uploadFile(input: UploadFileInput): Promise<void> {
+  async uploadFile(input: UploadFileInput): Promise<string> {
     const validated = uploadFileInputSchema.parse(input);
 
     this.logger.log(`Uploading file: ${validated.fileName} (${validated.contentLength} bytes)`, this.logMeta());
@@ -274,6 +274,7 @@ export class BambuApi implements IPrinterApi {
         const mqttAdapter = this.getMqttAdapter();
         await mqttAdapter.startPrint(validated.fileName);
       }
+      return validated.fileName;
     } catch (error) {
       this.logger.error(`Upload failed: ${(error as Error).message}`, this.logMeta());
       throw error;

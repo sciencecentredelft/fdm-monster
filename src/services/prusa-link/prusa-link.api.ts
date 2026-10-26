@@ -209,7 +209,7 @@ export class PrusaLinkApi implements IPrinterApi {
     ).get<string>(pathUrl);
   }
 
-  async uploadFile(input: UploadFileInput): Promise<void> {
+  async uploadFile(input: UploadFileInput): Promise<string> {
     const validated = uploadFileInputSchema.parse(input);
 
     try {
@@ -232,7 +232,11 @@ export class PrusaLinkApi implements IPrinterApi {
         this.eventEmitter2.emit(`${uploadDoneEvent(validated.uploadToken)}`, validated.uploadToken);
       }
 
-      return response.data;
+      const location = response.headers.location;
+      if (typeof location === "string" && location.length) {
+        return decodeURIComponent(location.split("/").pop() || validated.fileName);
+      }
+      return validated.fileName;
     } catch (e: any) {
       if (validated.uploadToken) {
         this.eventEmitter2.emit(

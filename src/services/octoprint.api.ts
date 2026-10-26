@@ -118,7 +118,7 @@ export class OctoprintApi implements IPrinterApi {
 
   async uploadFile(input: UploadFileInput) {
     const validated = uploadFileInputSchema.parse(input);
-    await this.client.uploadFileAsMultiPart(
+    const response: unknown = await this.client.uploadFileAsMultiPart(
       this.login,
       validated.stream,
       validated.fileName,
@@ -126,6 +126,15 @@ export class OctoprintApi implements IPrinterApi {
       validated.startPrint,
       validated.uploadToken,
     );
+    if (response && typeof response === "object" && "files" in response) {
+      const files = response.files;
+      if (files && typeof files === "object" && "local" in files) {
+        const local = files.local;
+        if (local && typeof local === "object" && "path" in local && typeof local.path === "string") {
+          return local.path;
+        }
+      }
+    }
   }
 
   async deleteFile(path: string) {

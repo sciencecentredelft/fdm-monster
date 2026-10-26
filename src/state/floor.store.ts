@@ -73,6 +73,17 @@ export class FloorStore extends KeyDiffCache<FloorDto> {
     return floorDto;
   }
 
+  async setGridPassword(floorId: number, password: string | null) {
+    const floor = await this.floorService.setGridPassword(floorId, password);
+    const dto = this.floorService.toDto(floor);
+    await this.setKeyValue(floorId, dto, true);
+    return dto;
+  }
+
+  async verifyGridPassword(floorId: number, password: string) {
+    return this.floorService.verifyGridPassword(floorId, password);
+  }
+
   async updateFloorOrder(floorId: number, order: number) {
     const floor = await this.floorService.updateOrder(floorId, order);
     const floorDto = this.floorService.toDto(floor);

@@ -1,9 +1,9 @@
-import { Repository } from "typeorm";
+import { In, IsNull, Not, Repository } from "typeorm";
 import { PrintJob, PrintJobMetadata } from "@/entities/print-job.entity";
 import EventEmitter2 from "eventemitter2";
 import type { ILoggerFactory } from "@/handlers/logger-factory";
 import { TypeormService } from "@/services/typeorm/typeorm.service";
-import { NotFoundException } from "@/exceptions/runtime.exceptions";
+import { NotFoundException, ValidationException } from "@/exceptions/runtime.exceptions";
 import {
   updateStatisticsForCompletion,
   updateStatisticsForFailure,
@@ -127,6 +127,8 @@ export class PrintJobService implements IPrintJobService {
   printJobRepository: Repository<PrintJob>;
   eventEmitter2: EventEmitter2;
   private readonly logger;
+  private readonly startingPrinters = new Set<number>();
+  private readonly printStartLocks = new Map<number, Promise<PrintJob>>();
 
   constructor(loggerFactory: ILoggerFactory, typeormService: TypeormService, eventEmitter2: EventEmitter2) {
     this.printJobRepository = typeormService.getDataSource().getRepository(PrintJob);
@@ -143,6 +145,60 @@ export class PrintJobService implements IPrintJobService {
       throw new NotFoundException(`Job ${id} not found`);
     }
     return job;
+  }
+
+  async startAssignedPrint(
+    printerId: number,
+    fileName: string,
+    assignedTo: string,
+    start: () => Promise<unknown>,
+    options: { printerName?: string; uploading?: boolean } = {},
+  ): Promise<PrintJob> {
+    if (this.startingPrinters.has(printerId)) {
+      throw new ValidationException({ error: "A print is already being started on this printer" });
+    }
+    this.startingPrinters.add(printerId);
+    try {
+      const previous = options.uploading
+        ? null
+        : await this.printJobRepository.findOne({
+            where: { printerId, fileName },
+            order: { createdAt: "DESC", id: "DESC" },
+          });
+      // Persist before sending the command: printer events can arrive before the HTTP response.
+      const job = await this.printJobRepository.save(
+        this.printJobRepository.create({
+          printerId,
+          printerName: options.printerName ?? null,
+          fileName,
+          assignedTo,
+          status: "STARTING",
+          analysisState: options.uploading ? "ANALYZING" : (previous?.analysisState ?? "NOT_ANALYZED"),
+          metadata: previous?.metadata ?? null,
+          fileStorageId: previous?.fileStorageId ?? null,
+          fileHash: previous?.fileHash ?? null,
+          fileSize: previous?.fileSize ?? null,
+          fileFormat: previous?.fileFormat ?? null,
+        }),
+      );
+      try {
+        await start();
+      } catch (error) {
+        // Do not overwrite a job already observed printing (e.g. a command response timed out).
+        await this.printJobRepository.update(
+          { id: job.id, status: "STARTING" },
+          {
+            status: "FAILED",
+            statusReason: "The print start command failed",
+            endedAt: new Date(),
+          },
+        );
+        throw error;
+      }
+      return await this.handlePrintStarted(printerId, fileName, job.id, options.printerName);
+    } finally {
+      this.startingPrinters.delete(printerId);
+    }
   }
 
   async handleFileAnalyzed(jobId: number, metadata: PrintJobMetadata, thumbnails?: any[]): Promise<PrintJob> {
@@ -175,17 +231,34 @@ export class PrintJobService implements IPrintJobService {
     jobId?: number,
     printerName?: string,
   ): Promise<PrintJob> {
+    const record = () => this.recordPrintStarted(printerId, fileName, jobId, printerName);
+    const previous = this.printStartLocks.get(printerId);
+    const pending = previous ? previous.then(record, record) : record();
+    this.printStartLocks.set(printerId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.printStartLocks.get(printerId) === pending) this.printStartLocks.delete(printerId);
+    }
+  }
+
+  private async recordPrintStarted(
+    printerId: number,
+    fileName: string,
+    jobId?: number,
+    printerName?: string,
+  ): Promise<PrintJob> {
     const existingJob = await this.printJobRepository.findOne({
       where: { printerId, status: "PRINTING" },
       order: { startedAt: "DESC" },
     });
 
-    if (existingJob?.fileName === fileName && !jobId) {
+    if (existingJob?.fileName === fileName && (!jobId || existingJob.id === jobId)) {
       return existingJob;
     }
 
-    // Different file is printing - mark the old one as UNKNOWN
-    if (existingJob && existingJob.fileName !== fileName && !jobId) {
+    // A newly accepted run supersedes any stale PRINTING record, including a reprint of the same file.
+    if (existingJob && existingJob.id !== jobId && (existingJob.fileName !== fileName || jobId)) {
       existingJob.status = "UNKNOWN";
       existingJob.statusReason =
         "Print state unknown - printer started new job while previous job was still marked as printing. " +
@@ -206,12 +279,18 @@ export class PrintJobService implements IPrintJobService {
         throw new Error(`Print job ${jobId} not found`);
       }
     } else {
-      // First, look for a PENDING job (created during upload)
+      // An explicitly assigned start takes precedence over older uploaded copies of the same file.
       job = await this.printJobRepository.findOne({
-        where: { printerId, fileName, status: "PENDING" },
+        where: { printerId, fileName, status: "STARTING" },
         order: { createdAt: "DESC" },
       });
 
+      if (!job) {
+        job = await this.printJobRepository.findOne({
+          where: { printerId, fileName, status: "PENDING" },
+          order: { createdAt: "DESC" },
+        });
+      }
       // If no pending/analyzed job, look for any recent job with this filename
       if (!job) {
         job = await this.printJobRepository.findOne({
@@ -450,6 +529,17 @@ export class PrintJobService implements IPrintJobService {
     return job;
   }
 
+  async failInterruptedAssignedStarts(): Promise<void> {
+    await this.printJobRepository.update(
+      { status: "STARTING", assignedTo: Not(IsNull()) },
+      {
+        status: "FAILED",
+        statusReason: "Server restarted before the print start could be confirmed",
+        endedAt: new Date(),
+      },
+    );
+  }
+
   async cleanupStaleJobs(): Promise<void> {
     const staleJobs = await this.printJobRepository.find({
       where: { status: "PRINTING" },
@@ -480,6 +570,20 @@ export class PrintJobService implements IPrintJobService {
     });
   }
 
+  async getActivePrintAssignments(): Promise<Record<number, { fileName: string; assignedTo: string | null }>> {
+    const jobs = await this.printJobRepository.find({
+      select: { id: true, printerId: true, fileName: true, assignedTo: true },
+      where: { status: In(["PRINTING", "PAUSED"]) },
+      order: { startedAt: "DESC", id: "DESC" },
+    });
+    const assignments: Record<number, { fileName: string; assignedTo: string | null }> = {};
+    for (const job of jobs) {
+      if (job.printerId === null || assignments[job.printerId]) continue;
+      assignments[job.printerId] = { fileName: job.fileName, assignedTo: job.assignedTo };
+    }
+    return assignments;
+  }
+
   async getPrintJobHistory(printerId: number, limit: number = 50): Promise<PrintJob[]> {
     return this.printJobRepository.find({
       where: { printerId },
@@ -488,15 +592,31 @@ export class PrintJobService implements IPrintJobService {
     });
   }
 
-  async getLastPrintStarts(printerId: number): Promise<{ fileName: string; startedAt: string }[]> {
-    return this.printJobRepository
-      .createQueryBuilder("job")
-      .select("job.fileName", "fileName")
-      .addSelect("strftime('%Y-%m-%dT%H:%M:%fZ', MAX(job.startedAt))", "startedAt")
-      .where("job.printerId = :printerId", { printerId })
-      .andWhere("job.startedAt IS NOT NULL")
-      .groupBy("job.fileName")
-      .getRawMany<{ fileName: string; startedAt: string }>();
+  async getLastPrintStarts(
+    printerId: number,
+  ): Promise<{ fileName: string; startedAt: string; assignedTo: string | null }[]> {
+    return this.printJobRepository.manager
+      .createQueryBuilder()
+      .select("latest.fileName", "fileName")
+      .addSelect("strftime('%Y-%m-%dT%H:%M:%fZ', latest.startedAt)", "startedAt")
+      .addSelect("latest.assignedTo", "assignedTo")
+      .from(
+        (query) =>
+          query
+            .select("job.fileName", "fileName")
+            .addSelect("job.startedAt", "startedAt")
+            .addSelect("job.assignedTo", "assignedTo")
+            .addSelect(
+              "ROW_NUMBER() OVER (PARTITION BY job.fileName ORDER BY job.startedAt DESC, job.id DESC)",
+              "position",
+            )
+            .from(PrintJob, "job")
+            .where("job.printerId = :printerId", { printerId })
+            .andWhere("job.startedAt IS NOT NULL"),
+        "latest",
+      )
+      .where("latest.position = 1")
+      .getRawMany<{ fileName: string; startedAt: string; assignedTo: string | null }>();
   }
 
   async markStarted(printerId: number, fileName: string, printerName?: string): Promise<PrintJob> {

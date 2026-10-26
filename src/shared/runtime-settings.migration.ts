@@ -66,6 +66,17 @@ export function migrateSettingsRuntime(knownSettings: Partial<Settings>): Settin
         entity[serverSettingsKey].experimentalBambuSupport ?? defaultServerSettings.experimentalBambuSupport,
       advancedFileListEnabled:
         entity[serverSettingsKey].advancedFileListEnabled ?? defaultServerSettings.advancedFileListEnabled,
+      printAssignmentEnabled:
+        entity[serverSettingsKey].printAssignmentEnabled ?? defaultServerSettings.printAssignmentEnabled,
+      showPrintAssigneeOnGrid:
+        entity[serverSettingsKey].showPrintAssigneeOnGrid ?? defaultServerSettings.showPrintAssigneeOnGrid,
+      checkPrinterStatusBeforePrint:
+        entity[serverSettingsKey].checkPrinterStatusBeforePrint ?? defaultServerSettings.checkPrinterStatusBeforePrint,
+      gridStatusColorsEnabled:
+        entity[serverSettingsKey].gridStatusColorsEnabled ?? defaultServerSettings.gridStatusColorsEnabled,
+      floorGridLockEnabled:
+        entity[serverSettingsKey].floorGridLockEnabled ?? defaultServerSettings.floorGridLockEnabled,
+      gridStatusColors: { ...defaultServerSettings.gridStatusColors, ...entity[serverSettingsKey].gridStatusColors },
       advancedFileListColumns:
         entity[serverSettingsKey].advancedFileListColumns ?? defaultServerSettings.advancedFileListColumns,
       sentryDiagnosticsEnabled:

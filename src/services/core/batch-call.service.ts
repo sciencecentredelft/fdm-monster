@@ -8,6 +8,7 @@ import type { ILoggerFactory } from "@/handlers/logger-factory";
 import { PrinterApiFactory } from "@/services/printer-api.factory";
 import { ReprintState, type IPrinterApi, type ReprintFileDto } from "@/services/printer-api.interface";
 import type { LoginDto } from "@/services/interfaces/login.dto";
+import { PrintJobService } from "@/services/orm/print-job.service";
 
 interface BatchSingletonModel {
   success?: boolean;
@@ -28,6 +29,7 @@ export class BatchCallService {
     private readonly printerCache: PrinterCache,
     private readonly printerSocketStore: PrinterSocketStore,
     private readonly printerService: IPrinterService,
+    private readonly printJobService: PrintJobService,
   ) {
     this.logger = loggerFactory(BatchCallService.name);
   }
@@ -149,7 +151,10 @@ export class BatchCallService {
     return await Promise.all(promises);
   }
 
-  async batchReprintCalls(printerIdFileList: { printerId: number; path: string }[]): Promise<Awaited<BatchModel>> {
+  async batchReprintCalls(
+    printerIdFileList: { printerId: number; path: string }[],
+    assignedTo?: string,
+  ): Promise<Awaited<BatchModel>> {
     const promises = [];
     for (const printerIdFile of printerIdFileList) {
       const { printerId, path } = printerIdFile;
@@ -157,8 +162,11 @@ export class BatchCallService {
 
       const time = Date.now();
       const client = this.getPrinter(login);
-      const promise = client
-        .startPrint(path)
+      const promise = (
+        assignedTo
+          ? this.printJobService.startAssignedPrint(printerId, path, assignedTo, () => client.startPrint(path))
+          : client.startPrint(path)
+      )
         .then(() => {
           return { success: true, printerId, time: Date.now() - time };
         })

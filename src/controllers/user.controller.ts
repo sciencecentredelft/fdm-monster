@@ -85,7 +85,7 @@ export class UserController {
   @route("/profile")
   async profile(req: Request, res: Response) {
     if (!req.user?.id) {
-      res.send({});
+      res.send({ roles: req.roles ?? [] });
       return;
     }
 

@@ -6,6 +6,7 @@ export const batchPrinterSchema = z.object({
 });
 
 export const executeBatchRePrinterSchema = z.object({
+  assignedTo: z.unknown().optional(),
   prints: z.array(
     z.object({
       printerId: idRuleV2,

@@ -27,6 +27,7 @@ export class CameraStreamController {
 
   @POST()
   @route("/")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async create(req: Request, res: Response) {
     const result = await this.cameraStreamService.create(req.body);
     res.send(this.cameraStreamService.toDto(result));
@@ -34,7 +35,7 @@ export class CameraStreamController {
 
   @PUT()
   @route("/:id")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async update(req: Request, res: Response) {
     const result = await this.cameraStreamService.update(req.local.id, req.body);
     res.send(this.cameraStreamService.toDto(result));
@@ -42,7 +43,7 @@ export class CameraStreamController {
 
   @DELETE()
   @route("/:id")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async delete(req: Request, res: Response) {
     await this.cameraStreamService.delete(req.local.id);
     res.send();

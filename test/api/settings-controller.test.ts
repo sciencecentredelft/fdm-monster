@@ -6,6 +6,7 @@ import {
   credentialSettingsKey,
   frontendSettingKey,
   getDefaultFrontendSettings,
+  getDefaultGridStatusColors,
   serverSettingsKey,
   timeoutSettingKey,
   wizardSettingKey,
@@ -35,6 +36,73 @@ beforeAll(async () => {
 });
 
 describe(SettingsController.name, () => {
+  it("persists and disables grid colours without changing other settings or losing colours", async () => {
+    const before = (await request.get(defaultRoute)).body.server;
+    expect(before.gridStatusColorsEnabled).toBe(false);
+    expect(before.gridStatusColors).toEqual(getDefaultGridStatusColors());
+    const colors = { ...getDefaultGridStatusColors(), printing: "#123456" };
+    const response = await request.put(`${defaultRoute}/grid-status-colors`).send({ enabled: true, colors });
+    expectOkResponse(response);
+    expect(response.body.server).toEqual({ ...before, gridStatusColorsEnabled: true, gridStatusColors: colors });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.gridStatusColors).toEqual(colors);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.gridStatusColors).toEqual(colors);
+    const disabled = await request.put(`${defaultRoute}/grid-status-colors`).send({ enabled: false });
+    expectOkResponse(disabled);
+    expect(disabled.body.server).toEqual({ ...before, gridStatusColors: colors });
+  });
+
+  it.each([
+    {},
+    { enabled: "true" },
+    { enabled: true, colors: {} },
+    ...["red", "#fff", "#12345678", "url(test)", null, 12].map((printing) => ({
+      enabled: true,
+      colors: { ...getDefaultGridStatusColors(), printing },
+    })),
+    { enabled: true, colors: { ...getDefaultGridStatusColors(), extra: "#000000" } },
+  ])("rejects invalid grid colour settings %j", async (body) => {
+    expectInvalidResponse(await request.put(`${defaultRoute}/grid-status-colors`).send(body));
+  });
+
+  it("defaults the status check off and persists it independently of assignment", async () => {
+    const before = (await request.get(defaultRoute)).body.server;
+    expect(before.checkPrinterStatusBeforePrint).toBe(false);
+    expect(before.printAssignmentEnabled).toBe(false);
+    const response = await request.put(`${defaultRoute}/pre-print-status-check`).send({ enabled: true });
+    expectOkResponse(response);
+    expect(response.body.server).toEqual({ ...before, checkPrinterStatusBeforePrint: true });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.checkPrinterStatusBeforePrint).toBe(true);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.checkPrinterStatusBeforePrint).toBe(true);
+    expectOkResponse(await request.put(`${defaultRoute}/pre-print-status-check`).send({ enabled: false }));
+    expect((await request.get(defaultRoute)).body.server).toEqual(before);
+  });
+
+  it.each([{}, { enabled: "true" }, { enabled: null }])(
+    "rejects invalid pre-print status settings %j",
+    async (body) => {
+      expectInvalidResponse(await request.put(`${defaultRoute}/pre-print-status-check`).send(body));
+    },
+  );
+
+  it("defaults grid assignee display off and persists its independent toggle", async () => {
+    const before = (await request.get(defaultRoute)).body.server;
+    expect(before.showPrintAssigneeOnGrid).toBe(false);
+    const response = await request.put(`${defaultRoute}/print-assignee-grid`).send({ enabled: true });
+    expectOkResponse(response);
+    expect(response.body.server).toEqual({ ...before, showPrintAssigneeOnGrid: true });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.showPrintAssigneeOnGrid).toBe(true);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.showPrintAssigneeOnGrid).toBe(true);
+    expectOkResponse(await request.put(`${defaultRoute}/print-assignee-grid`).send({ enabled: false }));
+    expect((await request.get(defaultRoute)).body.server).toEqual(before);
+  });
+
+  it.each([{}, { enabled: "true" }, { enabled: null }])("rejects invalid grid assignee settings %j", async (body) => {
+    expectInvalidResponse(await request.put(`${defaultRoute}/print-assignee-grid`).send(body));
+  });
+
   it("should OK on GET settings", async () => {
     const response = await request.get(defaultRoute).send();
 
@@ -48,6 +116,7 @@ describe(SettingsController.name, () => {
       registration: false,
       experimentalMoonrakerSupport: true,
       advancedFileListEnabled: false,
+      printAssignmentEnabled: false,
     });
     expect(body[wizardSettingKey]).toMatchObject({
       wizardCompleted: true,
@@ -72,6 +141,25 @@ describe(SettingsController.name, () => {
     expect(response.body).not.toBeNull();
     expectOkResponse(response);
   });
+
+  it("persists the independent print assignment toggle without changing advanced list settings", async () => {
+    const before = (await request.get(defaultRoute)).body.server;
+    const enabled = await request.put(`${defaultRoute}/print-assignment`).send({ enabled: true });
+    expectOkResponse(enabled);
+    expect(enabled.body.server).toEqual({ ...before, printAssignmentEnabled: true });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.printAssignmentEnabled).toBe(true);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.printAssignmentEnabled).toBe(true);
+    expectOkResponse(await request.put(`${defaultRoute}/print-assignment`).send({ enabled: false }));
+    expect((await request.get(defaultRoute)).body.server).toEqual(before);
+  });
+
+  it.each([{}, { enabled: "true" }, { enabled: null }])(
+    "rejects invalid print assignment settings %j",
+    async (body) => {
+      expectInvalidResponse(await request.put(`${defaultRoute}/print-assignment`).send(body));
+    },
+  );
 
   it("should OK on PUT experimental moonraker support setting", async () => {
     const response = await request.put(experimentalMoonrakerSupport).send({

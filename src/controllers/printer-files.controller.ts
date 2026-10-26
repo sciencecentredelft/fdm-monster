@@ -27,6 +27,8 @@ import { copyFileSync, createReadStream, existsSync, unlinkSync } from "node:fs"
 import { PrintJobService } from "@/services/orm/print-job.service";
 import { extname } from "node:path";
 import { SettingsStore } from "@/state/settings.store";
+import { validatePrintAssignment } from "./validation/print-assignment.validation";
+import type { PrintJob } from "@/entities/print-job.entity";
 
 @route(AppConstants.apiRoute + "/printer-files")
 @before([authenticate(), authorizeRoles([ROLES.ADMIN, ROLES.OPERATOR]), printerResolveMiddleware()])
@@ -70,8 +72,9 @@ export class PrinterFilesController {
   @route("/:id/last-print-starts")
   @before(permission(PERMS.PrinterFiles.Get))
   async getLastPrintStarts(req: Request, res: Response) {
-    if (!this.settingsStore.getServerSettings().advancedFileListEnabled) {
-      throw new NotFoundException("Advanced file list is disabled");
+    const settings = this.settingsStore.getServerSettings();
+    if (!settings.advancedFileListEnabled && !settings.printAssignmentEnabled) {
+      throw new NotFoundException("Advanced file list and print assignment are disabled");
     }
     const { currentPrinterId } = getScopedPrinter(req);
     res.send(await this.printJobService.getLastPrintStarts(currentPrinterId));
@@ -85,10 +88,24 @@ export class PrinterFilesController {
   @route("/:id/print")
   @before(permission(PERMS.PrinterFiles.Actions))
   async startPrintFile(req: Request, res: Response) {
-    const { currentPrinterId } = getScopedPrinter(req);
-    const { filePath } = await validateInput(req.body, startPrintFileSchema);
+    const { currentPrinterId, currentPrinter } = getScopedPrinter(req);
+    const { filePath, assignedTo: inputAssignedTo } = await validateInput(req.body, startPrintFileSchema);
+    const assignedTo = await validatePrintAssignment(
+      this.settingsStore.getServerSettings().printAssignmentEnabled,
+      inputAssignedTo,
+    );
     const encodedFilePath = filePath.split("/").map(encodeURIComponent).join("/");
-    await this.printerApi.startPrint(encodedFilePath);
+    if (assignedTo) {
+      await this.printJobService.startAssignedPrint(
+        currentPrinterId,
+        filePath,
+        assignedTo,
+        () => this.printerApi.startPrint(encodedFilePath),
+        { printerName: currentPrinter.name },
+      );
+    } else {
+      await this.printerApi.startPrint(encodedFilePath);
+    }
 
     this.logger.log(`Started print for printer ${currentPrinterId}`);
 
@@ -143,7 +160,10 @@ export class PrinterFilesController {
     const files = await this.multerService.multerLoadFileAsync(req, res, acceptedExtensions, true);
 
     // FormData has key-values with type string only
-    const { startPrint: startPrintString } = await validateInput(req.body, uploadFileSchema);
+    const { startPrint: startPrintString, assignedTo: inputAssignedTo } = await validateInput(
+      req.body,
+      uploadFileSchema,
+    );
     const startPrint = startPrintString === "true";
 
     if (!files?.length) {
@@ -160,24 +180,58 @@ export class PrinterFilesController {
     }
 
     const uploadedFile = files[0];
+    const clearUpload = () => {
+      try {
+        this.multerService.clearUploadedFile(uploadedFile);
+      } catch (error) {
+        this.logger.error(`Could not remove uploaded file from temporary storage ${errorSummary(error)}`);
+      }
+    };
+    let assignedTo: string | undefined;
+    try {
+      assignedTo = await validatePrintAssignment(
+        startPrint && this.settingsStore.getServerSettings().printAssignmentEnabled,
+        inputAssignedTo,
+      );
+    } catch (error) {
+      clearUpload();
+      throw error;
+    }
     const token = this.multerService.startTrackingSession(uploadedFile, currentPrinterId);
 
-    await this.printerApi
-      .uploadFile({
+    const upload = () =>
+      this.printerApi.uploadFile({
         stream: createReadStream(uploadedFile.path),
         fileName: uploadedFile.originalname,
         contentLength: uploadedFile.size,
-        startPrint,
+        startPrint: startPrint && !assignedTo,
         uploadToken: token,
-      })
-      .catch((e) => {
-        try {
-          this.multerService.clearUploadedFile(uploadedFile);
-        } catch (e) {
-          this.logger.error(`Could not remove uploaded file from temporary storage ${errorSummary(e)}`);
-        }
-        throw e;
       });
+    let assignedJob: PrintJob | undefined;
+    try {
+      if (assignedTo) {
+        const uploadedPath = await upload();
+        if (!uploadedPath) {
+          throw new ValidationException({
+            error:
+              "The printer did not return the uploaded file path; the file was uploaded but printing was not started",
+          });
+        }
+        const encodedPath = uploadedPath.split("/").map(encodeURIComponent).join("/");
+        assignedJob = await this.printJobService.startAssignedPrint(
+          currentPrinterId,
+          uploadedPath,
+          assignedTo,
+          () => this.printerApi.startPrint(encodedPath),
+          { printerName: currentPrinter.name, uploading: true },
+        );
+      } else {
+        await upload();
+      }
+    } catch (error) {
+      clearUpload();
+      throw error;
+    }
 
     // Process file: analyze, store, create job
     const ext = extname(uploadedFile.originalname);
@@ -276,13 +330,21 @@ export class PrinterFilesController {
       }
 
       // Create job with analyzed metadata, hash, and storageId
-      const job = await this.printJobService.createPendingJob(
-        currentPrinterId,
-        uploadedFile.originalname,
-        metadata,
-        currentPrinter.name,
-      );
+      const job = assignedJob
+        ? await this.printJobService.getJobByIdOrFail(assignedJob.id)
+        : await this.printJobService.createPendingJob(
+            currentPrinterId,
+            uploadedFile.originalname,
+            metadata,
+            currentPrinter.name,
+          );
 
+      if (assignedJob) {
+        job.metadata = metadata;
+        job.analysisState = "ANALYZED";
+        job.analyzedAt = new Date();
+        job.fileFormat = metadata.fileFormat;
+      }
       job.fileStorageId = fileStorageId;
       job.fileHash = fileHash;
       await this.printJobService.updateJob(job);
@@ -304,6 +366,9 @@ export class PrinterFilesController {
     } catch (error) {
       this.logger.error(`File processing failed: ${errorSummary(error)}`);
       captureException(error);
+      if (assignedJob) {
+        await this.printJobService.printJobRepository.update(assignedJob.id, { analysisState: "FAILED" });
+      }
       // Don't throw - allow upload to succeed even if analysis/storage fails
     } finally {
       // Always clean up temp file

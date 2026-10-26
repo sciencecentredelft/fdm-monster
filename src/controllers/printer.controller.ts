@@ -58,6 +58,7 @@ export class PrinterController {
 
   @POST()
   @route("/")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async create(req: Request, res: Response) {
     const newPrinter = req.body;
     if (req.query.forceSave !== "true") {
@@ -71,6 +72,7 @@ export class PrinterController {
 
   @POST()
   @route("/batch")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async createBatch(req: Request, res: Response) {
     const importResult = await this.printerService.batchImport(req.body);
     res.send(importResult);
@@ -92,6 +94,7 @@ export class PrinterController {
 
   @PATCH()
   @route("/:id")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async update(req: Request, res: Response) {
     const forceSave = req.query.forceSave === "true";
 
@@ -108,6 +111,7 @@ export class PrinterController {
 
   @DELETE()
   @route("/:id")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async delete(req: Request, res: Response) {
     const { currentPrinterId } = getScopedPrinter(req);
     await this.printerService.delete(currentPrinterId);
@@ -117,6 +121,7 @@ export class PrinterController {
 
   @PATCH()
   @route("/:id/enabled")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async updateEnabled(req: Request, res: Response) {
     const { currentPrinterId } = getScopedPrinter(req);
     const data = await validateMiddleware(req, updatePrinterEnabledSchema);
@@ -126,6 +131,7 @@ export class PrinterController {
 
   @PATCH()
   @route("/:id/disabled-reason")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async updatePrinterDisabledReason(req: Request, res: Response) {
     const { currentPrinterId } = getScopedPrinter(req);
     const data = await validateMiddleware(req, updatePrinterDisabledReasonSchema);
@@ -144,6 +150,7 @@ export class PrinterController {
 
   @POST()
   @route("/test-connection")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async testConnection(req: Request, res: Response) {
     if (req.body.printerURL?.length) {
       req.body.printerURL = normalizeUrl(req.body.printerURL, { defaultProtocol: defaultHttpProtocol });

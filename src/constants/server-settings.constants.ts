@@ -17,6 +17,16 @@ export const getDefaultWizardSettings = (): WizardSettingsDto => ({
 
 export const serverSettingsKey = "server";
 export const getDefaultAdvancedFileListColumns = () => ({ size: true, startedAt: true });
+export const getDefaultGridStatusColors = () => ({
+  ready: "#2E7D32",
+  printing: "#1565C0",
+  paused: "#FFB300",
+  offline: "#616161",
+  connecting: "#7B1FA2",
+  error: "#C62828",
+  disabled: "#303030",
+  maintenance: "#EF6C00",
+});
 export const getDefaultServerSettings = (): ServerSettingsDto => ({
   sentryDiagnosticsEnabled: false,
   loginRequired: true,
@@ -25,6 +35,12 @@ export const getDefaultServerSettings = (): ServerSettingsDto => ({
   experimentalBambuSupport: false,
   experimentalPrusaLinkSupport: false,
   advancedFileListEnabled: false,
+  printAssignmentEnabled: false,
+  showPrintAssigneeOnGrid: false,
+  checkPrinterStatusBeforePrint: false,
+  gridStatusColorsEnabled: false,
+  floorGridLockEnabled: false,
+  gridStatusColors: getDefaultGridStatusColors(),
   advancedFileListColumns: getDefaultAdvancedFileListColumns(),
 });
 

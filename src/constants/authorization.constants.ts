@@ -99,7 +99,9 @@ export const ROLE_PERMS: Record<RoleName, PermissionName[]> = {
   [ROLES.OPERATOR]: [
     ...new Set([
       ...allPerms(PERM_GROUP.Jobs),
-      ...allPerms(PERM_GROUP.Floors),
+      PERMS.Floors.Default,
+      PERMS.Floors.List,
+      PERMS.Floors.Get,
       ...allPerms(PERM_GROUP.PrinterFiles),
       ...allPerms(PERM_GROUP.PrinterSettings),
       ...allPerms(PERM_GROUP.PrinterMaintenanceLog),

@@ -6,6 +6,7 @@ import {
   wizardSettingKey,
 } from "@/constants/server-settings.constants";
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import type { GridStatusColors } from "@/services/interfaces/settings.dto";
 
 @Entity()
 export class Settings {
@@ -21,7 +22,13 @@ export class Settings {
     experimentalBambuSupport: boolean;
     experimentalPrusaLinkSupport: boolean;
     advancedFileListEnabled?: boolean;
-    advancedFileListColumns?: { size: boolean; startedAt: boolean };
+    advancedFileListColumns?: { size: boolean; startedAt: boolean; assignedTo?: boolean };
+    printAssignmentEnabled?: boolean;
+    showPrintAssigneeOnGrid?: boolean;
+    checkPrinterStatusBeforePrint?: boolean;
+    gridStatusColorsEnabled?: boolean;
+    floorGridLockEnabled?: boolean;
+    gridStatusColors?: GridStatusColors;
   };
 
   @Column({ type: "simple-json", nullable: false })

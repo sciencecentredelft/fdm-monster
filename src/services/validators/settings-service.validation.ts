@@ -5,6 +5,28 @@ export const advancedFileListColumnsSchema = z
   .object({
     size: z.boolean(),
     startedAt: z.boolean(),
+    assignedTo: z.boolean().optional(),
+  })
+  .strict();
+
+const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+export const gridStatusColorsSchema = z
+  .object({
+    ready: hexColorSchema,
+    printing: hexColorSchema,
+    paused: hexColorSchema,
+    offline: hexColorSchema,
+    connecting: hexColorSchema,
+    error: hexColorSchema,
+    disabled: hexColorSchema,
+    maintenance: hexColorSchema,
+  })
+  .strict();
+
+export const gridStatusColorSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    colors: gridStatusColorsSchema.optional(),
   })
   .strict();
 
@@ -16,12 +38,22 @@ export const serverSettingsUpdateSchema = z.object({
   experimentalPrusaLinkSupport: z.boolean(),
   sentryDiagnosticsEnabled: z.boolean(),
   advancedFileListEnabled: z.boolean().optional(),
+  printAssignmentEnabled: z.boolean().optional(),
+  showPrintAssigneeOnGrid: z.boolean().optional(),
+  checkPrinterStatusBeforePrint: z.boolean().optional(),
+  gridStatusColorsEnabled: z.boolean().optional(),
+  floorGridLockEnabled: z.boolean().optional(),
+  gridStatusColors: gridStatusColorsSchema.optional(),
   advancedFileListColumns: advancedFileListColumnsSchema.optional(),
 });
 
 export const advancedFileListSchema = z.object({
   enabled: z.boolean(),
   columns: advancedFileListColumnsSchema.optional(),
+});
+
+export const printAssignmentSettingsSchema = z.object({
+  enabled: z.boolean(),
 });
 
 export const timeoutSettingsUpdateSchema = z.object({

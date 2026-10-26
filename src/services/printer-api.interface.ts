@@ -131,7 +131,7 @@ export interface IPrinterApi {
 
   getFileChunk(path: string, startBytes: number, endBytes: number): AxiosPromise<string>;
 
-  uploadFile(input: UploadFileInput): Promise<void>;
+  uploadFile(input: UploadFileInput): Promise<string | void>;
 
   deleteFile(path: string): Promise<void>;
 

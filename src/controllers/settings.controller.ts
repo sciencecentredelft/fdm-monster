@@ -12,6 +12,8 @@ import {
   timeoutSettingsUpdateSchema,
   bambuSupportSchema,
   advancedFileListSchema,
+  printAssignmentSettingsSchema,
+  gridStatusColorSettingsSchema,
 } from "@/services/validators/settings-service.validation";
 import { SettingsStore } from "@/state/settings.store";
 import type { Request, Response } from "express";
@@ -66,7 +68,7 @@ export class SettingsController {
 
   @PATCH()
   @route("/sentry-diagnostics")
-  @before([demoUserNotAllowed])
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
   async updateSentryDiagnosticsEnabled(req: Request, res: Response) {
     const { enabled } = await validateInput(req.body, sentryDiagnosticsEnabledSchema);
     const result = this.settingsStore.setSentryDiagnosticsEnabled(enabled);
@@ -109,6 +111,7 @@ export class SettingsController {
 
   @PUT()
   @route("/experimental-bambu-support")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
   async updateBambuSupport(req: Request, res: Response) {
     const { enabled } = await validateInput(req.body, bambuSupportSchema);
     const result = await this.settingsStore.setExperimentalBambuSupport(enabled);
@@ -130,6 +133,46 @@ export class SettingsController {
     const update = await validateInput(req.body, advancedFileListSchema);
     const result = await this.settingsStore.updateAdvancedFileList(update);
     res.send(result);
+  }
+
+  @PUT()
+  @route("/print-assignment")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updatePrintAssignment(req: Request, res: Response) {
+    const { enabled } = await validateInput(req.body, printAssignmentSettingsSchema);
+    res.send(await this.settingsStore.setPrintAssignmentEnabled(enabled));
+  }
+
+  @PUT()
+  @route("/print-assignee-grid")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updatePrintAssigneeGrid(req: Request, res: Response) {
+    const { enabled } = await validateInput(req.body, printAssignmentSettingsSchema);
+    res.send(await this.settingsStore.setShowPrintAssigneeOnGrid(enabled));
+  }
+
+  @PUT()
+  @route("/pre-print-status-check")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updatePrePrintStatusCheck(req: Request, res: Response) {
+    const { enabled } = await validateInput(req.body, printAssignmentSettingsSchema);
+    res.send(await this.settingsStore.setCheckPrinterStatusBeforePrint(enabled));
+  }
+
+  @PUT()
+  @route("/grid-status-colors")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updateGridStatusColors(req: Request, res: Response) {
+    const data = await validateInput(req.body, gridStatusColorSettingsSchema);
+    res.send(await this.settingsStore.setGridStatusColors(data));
+  }
+
+  @PUT()
+  @route("/floor-grid-lock")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updateFloorGridLock(req: Request, res: Response) {
+    const { enabled } = await validateInput(req.body, printAssignmentSettingsSchema);
+    res.send(await this.settingsStore.setFloorGridLockEnabled(enabled));
   }
 
   @PUT()

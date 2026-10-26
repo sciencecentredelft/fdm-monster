@@ -12,6 +12,12 @@ export class Floor {
   @Column()
   order: number;
 
+  @Column({ type: "varchar", nullable: true, select: false })
+  gridPasswordHash: string | null;
+
+  @Column({ type: "varchar", nullable: true })
+  gridLockVersion: string | null;
+
   @OneToMany(() => FloorPosition, (gp) => gp.floor, { eager: true })
   printers: Relation<FloorPosition>[];
 }

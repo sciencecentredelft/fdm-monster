@@ -13,6 +13,8 @@ import {
 } from "@/services/validators/floor-service.validation";
 import { NotFoundException } from "@/exceptions/runtime.exceptions";
 import { FindManyOptions, FindOneOptions } from "typeorm";
+import { hash, compare } from "bcryptjs";
+import { randomUUID } from "node:crypto";
 
 export class FloorService
   extends BaseService(Floor, FloorDto, CreateFloorDto, UpdateFloorDto)
@@ -65,12 +67,36 @@ export class FloorService
       id: floor.id,
       name: floor.name,
       order: floor.order,
+      gridProtected: !!floor.gridLockVersion,
+      gridLockVersion: floor.gridLockVersion ?? null,
       printers: floor.printers.map((p) => ({
         printerId: p.printerId,
         floorId: p.floorId,
         x: p.x,
         y: p.y,
       })),
+    };
+  }
+
+  async setGridPassword(floorId: number, password: string | null): Promise<Floor> {
+    await this.get(floorId);
+    await this.repository.update(floorId, {
+      gridPasswordHash: password === null ? null : await hash(password, 10),
+      gridLockVersion: password === null ? null : randomUUID(),
+    });
+    return this.get(floorId);
+  }
+
+  async verifyGridPassword(floorId: number, password: string) {
+    await this.get(floorId);
+    const floor = await this.repository
+      .createQueryBuilder("floor")
+      .addSelect("floor.gridPasswordHash")
+      .where("floor.id = :floorId", { floorId })
+      .getOneOrFail();
+    return {
+      unlocked: !!floor.gridPasswordHash && (await compare(password, floor.gridPasswordHash)),
+      gridLockVersion: floor.gridLockVersion,
     };
   }
 

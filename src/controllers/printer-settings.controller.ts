@@ -1,7 +1,7 @@
 import { before, GET, POST, route } from "awilix-express";
-import { authenticate, permission } from "@/middleware/authenticate";
+import { authenticate, authorizeRoles, permission } from "@/middleware/authenticate";
 import { AppConstants } from "@/server.constants";
-import { PERMS } from "@/constants/authorization.constants";
+import { PERMS, ROLES } from "@/constants/authorization.constants";
 import { OctoprintClient } from "@/services/octoprint/octoprint.client";
 import { PrinterCache } from "@/state/printer.cache";
 import type { Request, Response } from "express";
@@ -26,7 +26,7 @@ export class PrinterSettingsController {
 
   @POST()
   @route("/:id/sync-printername")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async syncPrinterName(req: Request, res: Response) {
     const printerLogin = await this.printerCache.getLoginDtoAsync(req.local.id);
     const name = await this.printerCache.getNameAsync(req.local.id);

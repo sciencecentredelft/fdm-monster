@@ -2,6 +2,7 @@ import { InternalServerException } from "@/exceptions/runtime.exceptions";
 import {
   credentialSettingsKey,
   getDefaultAdvancedFileListColumns,
+  getDefaultGridStatusColors,
   frontendSettingKey,
   serverSettingsKey,
   timeoutSettingKey,
@@ -19,6 +20,7 @@ import {
   frontendSettingsUpdateSchema,
   serverSettingsUpdateSchema,
   timeoutSettingsUpdateSchema,
+  gridStatusColorSettingsSchema,
 } from "@/services/validators/settings-service.validation";
 import { Settings } from "@/entities";
 import { v4 as uuidv4 } from "uuid";
@@ -33,6 +35,14 @@ export class SettingsStore {
     private readonly settingsService: ISettingsService,
   ) {
     this.logger = loggerFactory(SettingsStore.name);
+  }
+
+  async setGridStatusColors({ enabled, colors }: z.infer<typeof gridStatusColorSettingsSchema>) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      gridStatusColorsEnabled: enabled,
+      gridStatusColors: colors ?? this.getServerSettings().gridStatusColors ?? getDefaultGridStatusColors(),
+    });
   }
 
   getSettings() {
@@ -50,6 +60,12 @@ export class SettingsStore {
         experimentalPrusaLinkSupport: settings[serverSettingsKey].experimentalPrusaLinkSupport,
         experimentalBambuSupport: settings[serverSettingsKey].experimentalBambuSupport,
         advancedFileListEnabled: settings[serverSettingsKey].advancedFileListEnabled ?? false,
+        printAssignmentEnabled: settings[serverSettingsKey].printAssignmentEnabled ?? false,
+        showPrintAssigneeOnGrid: settings[serverSettingsKey].showPrintAssigneeOnGrid ?? false,
+        checkPrinterStatusBeforePrint: settings[serverSettingsKey].checkPrinterStatusBeforePrint ?? false,
+        gridStatusColorsEnabled: settings[serverSettingsKey].gridStatusColorsEnabled ?? false,
+        floorGridLockEnabled: settings[serverSettingsKey].floorGridLockEnabled ?? false,
+        gridStatusColors: settings[serverSettingsKey].gridStatusColors ?? getDefaultGridStatusColors(),
         advancedFileListColumns:
           settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
       },
@@ -78,6 +94,12 @@ export class SettingsStore {
         experimentalPrusaLinkSupport: settings[serverSettingsKey].experimentalPrusaLinkSupport,
         experimentalBambuSupport: settings[serverSettingsKey].experimentalBambuSupport,
         advancedFileListEnabled: settings[serverSettingsKey].advancedFileListEnabled ?? false,
+        printAssignmentEnabled: settings[serverSettingsKey].printAssignmentEnabled ?? false,
+        showPrintAssigneeOnGrid: settings[serverSettingsKey].showPrintAssigneeOnGrid ?? false,
+        checkPrinterStatusBeforePrint: settings[serverSettingsKey].checkPrinterStatusBeforePrint ?? false,
+        gridStatusColorsEnabled: settings[serverSettingsKey].gridStatusColorsEnabled ?? false,
+        floorGridLockEnabled: settings[serverSettingsKey].floorGridLockEnabled ?? false,
+        gridStatusColors: settings[serverSettingsKey].gridStatusColors ?? getDefaultGridStatusColors(),
         advancedFileListColumns:
           settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
       },
@@ -205,13 +227,38 @@ export class SettingsStore {
     columns,
   }: {
     enabled: boolean;
-    columns?: { size: boolean; startedAt: boolean };
+    columns?: { size: boolean; startedAt: boolean; assignedTo?: boolean };
   }) {
     return this.updateServerSettings({
       ...this.getServerSettings(),
       advancedFileListEnabled: enabled,
-      advancedFileListColumns: columns ?? this.getServerSettings().advancedFileListColumns,
+      advancedFileListColumns: { ...this.getServerSettings().advancedFileListColumns, ...columns },
     });
+  }
+
+  async setPrintAssignmentEnabled(enabled: boolean) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      printAssignmentEnabled: enabled,
+    });
+  }
+
+  async setShowPrintAssigneeOnGrid(enabled: boolean) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      showPrintAssigneeOnGrid: enabled,
+    });
+  }
+
+  async setCheckPrinterStatusBeforePrint(enabled: boolean) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      checkPrinterStatusBeforePrint: enabled,
+    });
+  }
+
+  async setFloorGridLockEnabled(enabled: boolean) {
+    return this.updateServerSettings({ ...this.getServerSettings(), floorGridLockEnabled: enabled });
   }
 
   async updateTimeoutSettings(timeoutSettings: z.infer<typeof timeoutSettingsUpdateSchema>) {

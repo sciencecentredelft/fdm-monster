@@ -203,7 +203,7 @@ export class MoonrakerApi implements IPrinterApi {
 
   async uploadFile(input: UploadFileInput) {
     const validated = uploadFileInputSchema.parse(input);
-    await this.client.postServerFileUpload(
+    const response: unknown = await this.client.postServerFileUpload(
       this.login,
       validated.stream,
       validated.fileName,
@@ -211,6 +211,15 @@ export class MoonrakerApi implements IPrinterApi {
       validated.startPrint,
       validated.uploadToken,
     );
+    if (response && typeof response === "object" && "result" in response) {
+      const result = response.result;
+      if (result && typeof result === "object" && "item" in result) {
+        const item = result.item;
+        if (item && typeof item === "object" && "path" in item && typeof item.path === "string") {
+          return item.path;
+        }
+      }
+    }
   }
 
   async deleteFile(path: string) {

@@ -3,6 +3,10 @@ import { Floor } from "@/entities";
 import { FindOneOptions } from "typeorm";
 
 export interface IFloorService {
+  setGridPassword(floorId: number, password: string | null): Promise<Floor>;
+
+  verifyGridPassword(floorId: number, password: string): Promise<{ unlocked: boolean; gridLockVersion: string | null }>;
+
   create(input: CreateFloorDto): Promise<Floor>;
 
   delete(floorId: number): Promise<void>;

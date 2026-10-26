@@ -26,6 +26,7 @@ export class PrinterTagController {
 
   @POST()
   @route("/")
+  @before([authorizeRoles([ROLES.ADMIN])])
   async createTag(req: Request, res: Response) {
     // Safety mechanism against updating
     if (req.body.id) {
@@ -37,7 +38,7 @@ export class PrinterTagController {
 
   @PATCH()
   @route("/:id/name")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async updateTagName(req: Request, res: Response) {
     const entity = await this.printerTagService.updateTagName(req.local.id, req.body.name);
     res.send(entity);
@@ -45,7 +46,7 @@ export class PrinterTagController {
 
   @PATCH()
   @route("/:id/color")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async updateTagColor(req: Request, res: Response) {
     const entity = await this.printerTagService.updateTagColor(req.local.id, req.body.color);
     res.send(entity);
@@ -53,14 +54,14 @@ export class PrinterTagController {
 
   @DELETE()
   @route("/:id")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async deleteTag(req: Request, res: Response) {
     res.send(await this.printerTagService.deleteTag(req.local.id));
   }
 
   @POST()
   @route("/:id/printer")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async addPrinterToTag(req: Request, res: Response) {
     const entity = await this.printerTagService.addPrinterToTag(req.local.id, req.body.printerId);
     res.send(this.printerTagService.toDto(entity));
@@ -68,7 +69,7 @@ export class PrinterTagController {
 
   @DELETE()
   @route("/:id/printer")
-  @before([ParamId("id")])
+  @before([authorizeRoles([ROLES.ADMIN]), ParamId("id")])
   async removePrinterFromTag(req: Request, res: Response) {
     res.send(await this.printerTagService.removePrinterFromTag(req.local.id, req.body.printerId));
   }

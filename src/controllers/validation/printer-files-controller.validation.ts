@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const startPrintFileSchema = z.object({
   filePath: z.string().min(1),
+  assignedTo: z.unknown().optional(),
 });
 
 export const downloadFileSchema = z.object({
@@ -14,6 +15,7 @@ export const getFileSchema = z.object({
 
 export const uploadFileSchema = z.object({
   startPrint: z.enum(["true", "false"]),
+  assignedTo: z.unknown().optional(),
 });
 
 export const getFilesSchema = z.object({

@@ -88,8 +88,8 @@ describe(PrinterFilesController.name, () => {
       expect(response.body).toHaveLength(2);
       expect(response.body).toEqual(
         expect.arrayContaining([
-          { fileName: "folder/test.gcode", startedAt: "2026-10-02T12:45:00.000Z" },
-          { fileName: "other/test.gcode", startedAt: "2026-10-03T14:00:00.000Z" },
+          { fileName: "folder/test.gcode", startedAt: "2026-10-02T12:45:00.000Z", assignedTo: null },
+          { fileName: "other/test.gcode", startedAt: "2026-10-03T14:00:00.000Z", assignedTo: null },
         ]),
       );
     });
@@ -176,6 +176,115 @@ describe(PrinterFilesController.name, () => {
       filePath: filename,
     });
     expectOkResponse(response);
+  });
+
+  describe("opt-in print assignment", () => {
+    beforeEach(async () => {
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setPrintAssignmentEnabled(true);
+    });
+    afterEach(async () => {
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setPrintAssignmentEnabled(false);
+    });
+
+    it.each([undefined, "", "   ", "x".repeat(101), 42, {}])(
+      "rejects an invalid name %j before printing",
+      async (assignedTo) => {
+        const printer = await createTestPrinter(request);
+        expectInvalidResponse(
+          await request.post(printFileRoute(printer.id)).send({ filePath: "test.gcode", assignedTo }),
+        );
+        const jobs = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
+        expect(jobs).toEqual([]);
+      },
+    );
+
+    it("trims and persists the name for an exact path and exposes it in job details", async () => {
+      const printer = await createTestPrinter(request);
+      const filePath = "folder/test #.gcode";
+      nock(printer.printerURL).post("/api/files/local/folder/test%20%23.gcode").reply(200);
+      expectOkResponse(await request.post(printFileRoute(printer.id)).send({ filePath, assignedTo: "  Alice  " }));
+      const [job] = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
+      expect(job).toMatchObject({ fileName: filePath, assignedTo: "Alice", status: "PRINTING" });
+      const details = await request.get(`${AppConstants.apiRoute}/print-jobs/${job.id}`);
+      expectOkResponse(details);
+      expect(details.body.assignedTo).toBe("Alice");
+      expect((await request.get(`${getRoute(printer.id)}/last-print-starts`)).body[0].assignedTo).toBe("Alice");
+    });
+
+    it("requires a name for Upload and Print but not upload-only", async () => {
+      const printer = await createTestPrinter(request);
+      expectInvalidResponse(
+        await request.post(uploadFileRoute(printer.id)).field("startPrint", "true").attach("file", gcodePath),
+      );
+      nock(printer.printerURL).post("/api/files/local").reply(200);
+      expectOkResponse(
+        await request.post(uploadFileRoute(printer.id)).field("startPrint", "false").attach("file", gcodePath),
+      );
+    });
+
+    it("attaches analyzed upload data to the assigned run without creating a second pending job", async () => {
+      const printer = await createTestPrinter(request);
+      nock(printer.printerURL)
+        .post("/api/files/local")
+        .reply(200, { files: { local: { path: "sample.gcode" } } });
+      nock(printer.printerURL).post("/api/files/local/sample.gcode").reply(200);
+      expectOkResponse(
+        await request
+          .post(uploadFileRoute(printer.id))
+          .field("startPrint", "true")
+          .field("assignedTo", "  Alice  ")
+          .attach("file", gcodePath),
+      );
+      const jobs = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({ assignedTo: "Alice", status: "PRINTING", analysisState: "ANALYZED" });
+      expect(jobs[0].fileStorageId).toBeTruthy();
+    });
+
+    it("assigns the actual printer-returned upload path before starting a renamed file", async () => {
+      const printer = await createTestPrinter(request);
+      nock(printer.printerURL)
+        .post("/api/files/local")
+        .reply(201, { files: { local: { path: "renamed_file.gcode" } } });
+      nock(printer.printerURL).post("/api/files/local/renamed_file.gcode").reply(200);
+      expectOkResponse(
+        await request
+          .post(uploadFileRoute(printer.id))
+          .field("startPrint", "true")
+          .field("assignedTo", "Alice")
+          .attach("file", gcodePath),
+      );
+      const jobs = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({ fileName: "renamed_file.gcode", assignedTo: "Alice", status: "PRINTING" });
+    });
+
+    it("does not guess an uploaded path or start a print when the response is missing it", async () => {
+      const printer = await createTestPrinter(request);
+      nock(printer.printerURL).post("/api/files/local").reply(201, {});
+      expectInvalidResponse(
+        await request
+          .post(uploadFileRoute(printer.id))
+          .field("startPrint", "true")
+          .field("assignedTo", "Alice")
+          .attach("file", gcodePath),
+      );
+      expect(await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id)).toEqual(
+        [],
+      );
+    });
+
+    it("ignores assignment data when the feature is disabled", async () => {
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setPrintAssignmentEnabled(false);
+      const printer = await createTestPrinter(request);
+      nock(printer.printerURL).post("/api/files/local/test.gcode").reply(200);
+      expectOkResponse(
+        await request.post(printFileRoute(printer.id)).send({ filePath: "test.gcode", assignedTo: "Alice" }),
+      );
+      expect(await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id)).toEqual(
+        [],
+      );
+    });
   });
 
   it("should allow POST upload file", async () => {
