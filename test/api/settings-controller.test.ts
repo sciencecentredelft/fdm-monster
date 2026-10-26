@@ -13,8 +13,11 @@ import {
 import { SettingsController } from "@/controllers/settings.controller";
 import TestAgent from "supertest/lib/agent";
 import { FrontendSettingsDto } from "@/services/interfaces/settings.dto";
+import { SettingsStore } from "@/state/settings.store";
+import { DITokens } from "@/container.tokens";
 
 let request: TestAgent<Test>;
+let settingsStore: SettingsStore;
 
 const defaultRoute = `${AppConstants.apiRoute}/settings`;
 const sensitiveSettingsRoute = `${defaultRoute}/sensitive`;
@@ -26,7 +29,9 @@ const slicerApiKeyRoute = `${defaultRoute}/slicer-api-key`;
 const regenerateSlicerApiKeyRoute = `${slicerApiKeyRoute}/regenerate`;
 
 beforeAll(async () => {
-  ({ request } = await setupTestApp(true));
+  const app = await setupTestApp(true);
+  request = app.request;
+  settingsStore = app.container.resolve<SettingsStore>(DITokens.settingsStore);
 });
 
 describe(SettingsController.name, () => {
@@ -42,6 +47,7 @@ describe(SettingsController.name, () => {
       loginRequired: false,
       registration: false,
       experimentalMoonrakerSupport: true,
+      advancedFileListEnabled: false,
     });
     expect(body[wizardSettingKey]).toMatchObject({
       wizardCompleted: true,
@@ -72,6 +78,64 @@ describe(SettingsController.name, () => {
       enabled: true,
     });
     expectOkResponse(response);
+  });
+
+  it("should persist and disable the advanced file list without changing other settings", async () => {
+    const before = (await request.get(defaultRoute)).body;
+    const enabled = await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: true });
+    expectOkResponse(enabled);
+    expect(enabled.body.server).toEqual({ ...before.server, advancedFileListEnabled: true });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.advancedFileListEnabled).toBe(true);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.advancedFileListEnabled).toBe(true);
+
+    const disabled = await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: false });
+    expectOkResponse(disabled);
+    expect(disabled.body.server).toEqual(before.server);
+  });
+
+  it.each([{}, { enabled: "true" }, { enabled: null }])(
+    "should reject invalid advanced file list input %j",
+    async (body) => {
+      const response = await request.put(`${defaultRoute}/advanced-file-list`).send(body);
+      expectInvalidResponse(response);
+    },
+  );
+
+  it("should persist optional columns and preserve them when only the enable switch changes", async () => {
+    const columns = { size: false, startedAt: false };
+    const before = (await request.get(defaultRoute)).body.server;
+    const response = await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: true, columns });
+    expectOkResponse(response);
+    expect(response.body.server).toEqual({
+      ...before,
+      advancedFileListEnabled: true,
+      advancedFileListColumns: columns,
+    });
+    await settingsStore.loadSettings();
+    expect((await request.get(defaultRoute)).body.server.advancedFileListColumns).toEqual(columns);
+    expect((await request.get(sensitiveSettingsRoute)).body.server.advancedFileListColumns).toEqual(columns);
+    const disabled = await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: false });
+    expectOkResponse(disabled);
+    expect(disabled.body.server.advancedFileListColumns).toEqual(columns);
+    const restored = await request
+      .put(`${defaultRoute}/advanced-file-list`)
+      .send({ enabled: false, columns: { size: true, startedAt: true } });
+    expectOkResponse(restored);
+  });
+
+  it.each([
+    null,
+    {},
+    { size: true },
+    { size: "false", startedAt: true },
+    { size: true, startedAt: false, name: false },
+    ["size"],
+  ])("should reject invalid advanced file list columns %j", async (columns) => {
+    const before = (await request.get(defaultRoute)).body.server;
+    const response = await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: true, columns });
+    expectInvalidResponse(response);
+    expect((await request.get(defaultRoute)).body.server).toEqual(before);
   });
 
   it("should OK on PATCH sentry diagnostics ", async () => {

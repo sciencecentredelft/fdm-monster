@@ -19,6 +19,8 @@ export interface ServerSettingsDto {
   experimentalMoonrakerSupport: boolean;
   experimentalBambuSupport: boolean;
   experimentalPrusaLinkSupport: boolean;
+  advancedFileListEnabled?: boolean;
+  advancedFileListColumns?: { size: boolean; startedAt: boolean };
 }
 
 export type WizardSettingsDto = z.infer<typeof wizardUpdateSchema>;

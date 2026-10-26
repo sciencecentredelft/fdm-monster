@@ -20,6 +20,8 @@ export class Settings {
     experimentalMoonrakerSupport: boolean;
     experimentalBambuSupport: boolean;
     experimentalPrusaLinkSupport: boolean;
+    advancedFileListEnabled?: boolean;
+    advancedFileListColumns?: { size: boolean; startedAt: boolean };
   };
 
   @Column({ type: "simple-json", nullable: false })

@@ -16,6 +16,7 @@ export const getDefaultWizardSettings = (): WizardSettingsDto => ({
 });
 
 export const serverSettingsKey = "server";
+export const getDefaultAdvancedFileListColumns = () => ({ size: true, startedAt: true });
 export const getDefaultServerSettings = (): ServerSettingsDto => ({
   sentryDiagnosticsEnabled: false,
   loginRequired: true,
@@ -23,6 +24,8 @@ export const getDefaultServerSettings = (): ServerSettingsDto => ({
   experimentalMoonrakerSupport: false,
   experimentalBambuSupport: false,
   experimentalPrusaLinkSupport: false,
+  advancedFileListEnabled: false,
+  advancedFileListColumns: getDefaultAdvancedFileListColumns(),
 });
 
 export const credentialSettingsKey = "credentials";

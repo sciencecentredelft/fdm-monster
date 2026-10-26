@@ -1,6 +1,7 @@
 import { InternalServerException } from "@/exceptions/runtime.exceptions";
 import {
   credentialSettingsKey,
+  getDefaultAdvancedFileListColumns,
   frontendSettingKey,
   serverSettingsKey,
   timeoutSettingKey,
@@ -48,6 +49,9 @@ export class SettingsStore {
         experimentalMoonrakerSupport: settings[serverSettingsKey].experimentalMoonrakerSupport,
         experimentalPrusaLinkSupport: settings[serverSettingsKey].experimentalPrusaLinkSupport,
         experimentalBambuSupport: settings[serverSettingsKey].experimentalBambuSupport,
+        advancedFileListEnabled: settings[serverSettingsKey].advancedFileListEnabled ?? false,
+        advancedFileListColumns:
+          settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
       },
       [wizardSettingKey]: settings[wizardSettingKey],
       [frontendSettingKey]: settings[frontendSettingKey],
@@ -73,6 +77,9 @@ export class SettingsStore {
         experimentalMoonrakerSupport: settings[serverSettingsKey].experimentalMoonrakerSupport,
         experimentalPrusaLinkSupport: settings[serverSettingsKey].experimentalPrusaLinkSupport,
         experimentalBambuSupport: settings[serverSettingsKey].experimentalBambuSupport,
+        advancedFileListEnabled: settings[serverSettingsKey].advancedFileListEnabled ?? false,
+        advancedFileListColumns:
+          settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
       },
     });
   }
@@ -187,6 +194,24 @@ export class SettingsStore {
   async updateServerSettings(serverSettings: z.infer<typeof serverSettingsUpdateSchema>) {
     this.settings = await this.settingsService.updateServerSettings(serverSettings);
     return this.getSettings();
+  }
+
+  async setAdvancedFileListEnabled(enabled: boolean) {
+    return this.updateAdvancedFileList({ enabled });
+  }
+
+  async updateAdvancedFileList({
+    enabled,
+    columns,
+  }: {
+    enabled: boolean;
+    columns?: { size: boolean; startedAt: boolean };
+  }) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      advancedFileListEnabled: enabled,
+      advancedFileListColumns: columns ?? this.getServerSettings().advancedFileListColumns,
+    });
   }
 
   async updateTimeoutSettings(timeoutSettings: z.infer<typeof timeoutSettingsUpdateSchema>) {

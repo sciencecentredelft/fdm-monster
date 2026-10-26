@@ -64,6 +64,10 @@ export function migrateSettingsRuntime(knownSettings: Partial<Settings>): Settin
         entity[serverSettingsKey].experimentalPrusaLinkSupport ?? defaultServerSettings.experimentalPrusaLinkSupport,
       experimentalBambuSupport:
         entity[serverSettingsKey].experimentalBambuSupport ?? defaultServerSettings.experimentalBambuSupport,
+      advancedFileListEnabled:
+        entity[serverSettingsKey].advancedFileListEnabled ?? defaultServerSettings.advancedFileListEnabled,
+      advancedFileListColumns:
+        entity[serverSettingsKey].advancedFileListColumns ?? defaultServerSettings.advancedFileListColumns,
       sentryDiagnosticsEnabled:
         entity[serverSettingsKey].sentryDiagnosticsEnabled ?? defaultServerSettings.sentryDiagnosticsEnabled,
     };

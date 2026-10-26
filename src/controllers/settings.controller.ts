@@ -11,6 +11,7 @@ import {
   sentryDiagnosticsEnabledSchema,
   timeoutSettingsUpdateSchema,
   bambuSupportSchema,
+  advancedFileListSchema,
 } from "@/services/validators/settings-service.validation";
 import { SettingsStore } from "@/state/settings.store";
 import type { Request, Response } from "express";
@@ -119,6 +120,15 @@ export class SettingsController {
         await this.printerService.updateEnabled(printer.id, false);
       }
     }
+    res.send(result);
+  }
+
+  @PUT()
+  @route("/advanced-file-list")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updateAdvancedFileList(req: Request, res: Response) {
+    const update = await validateInput(req.body, advancedFileListSchema);
+    const result = await this.settingsStore.updateAdvancedFileList(update);
     res.send(result);
   }
 

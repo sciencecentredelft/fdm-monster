@@ -488,6 +488,17 @@ export class PrintJobService implements IPrintJobService {
     });
   }
 
+  async getLastPrintStarts(printerId: number): Promise<{ fileName: string; startedAt: string }[]> {
+    return this.printJobRepository
+      .createQueryBuilder("job")
+      .select("job.fileName", "fileName")
+      .addSelect("strftime('%Y-%m-%dT%H:%M:%fZ', MAX(job.startedAt))", "startedAt")
+      .where("job.printerId = :printerId", { printerId })
+      .andWhere("job.startedAt IS NOT NULL")
+      .groupBy("job.fileName")
+      .getRawMany<{ fileName: string; startedAt: string }>();
+  }
+
   async markStarted(printerId: number, fileName: string, printerName?: string): Promise<PrintJob> {
     return await this.handlePrintStarted(printerId, fileName, undefined, printerName);
   }

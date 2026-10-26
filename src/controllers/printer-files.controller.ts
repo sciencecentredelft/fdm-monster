@@ -26,6 +26,7 @@ import { FileStorageService } from "@/services/file-storage.service";
 import { copyFileSync, createReadStream, existsSync, unlinkSync } from "node:fs";
 import { PrintJobService } from "@/services/orm/print-job.service";
 import { extname } from "node:path";
+import { SettingsStore } from "@/state/settings.store";
 
 @route(AppConstants.apiRoute + "/printer-files")
 @before([authenticate(), authorizeRoles([ROLES.ADMIN, ROLES.OPERATOR]), printerResolveMiddleware()])
@@ -40,6 +41,7 @@ export class PrinterFilesController {
     private readonly fileStorageService: FileStorageService,
     private readonly multerService: MulterService,
     private readonly printerThumbnailCache: PrinterThumbnailCache,
+    private readonly settingsStore: SettingsStore,
   ) {
     this.logger = loggerFactory(PrinterFilesController.name);
   }
@@ -62,6 +64,17 @@ export class PrinterFilesController {
 
     const files = await printerApi.getFiles(recursive, startDir);
     res.send(files);
+  }
+
+  @GET()
+  @route("/:id/last-print-starts")
+  @before(permission(PERMS.PrinterFiles.Get))
+  async getLastPrintStarts(req: Request, res: Response) {
+    if (!this.settingsStore.getServerSettings().advancedFileListEnabled) {
+      throw new NotFoundException("Advanced file list is disabled");
+    }
+    const { currentPrinterId } = getScopedPrinter(req);
+    res.send(await this.printJobService.getLastPrintStarts(currentPrinterId));
   }
 
   @POST()

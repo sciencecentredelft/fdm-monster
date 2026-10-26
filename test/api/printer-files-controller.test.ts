@@ -14,6 +14,7 @@ import { BambuClientStub } from "./stubs/bambu.client.stub";
 import { BambuFtpAdapterStub } from "./stubs/bambu-ftp.adapter.stub";
 import { BambuMqttAdapterStub } from "./stubs/bambu-mqtt.adapter.stub";
 import { SettingsStore } from "@/state/settings.store";
+import { PrintJobService } from "@/services/orm/print-job.service";
 
 const defaultRoute = AppConstants.apiRoute + "/printer-files";
 const thumbnailsRoute = `${defaultRoute}/thumbnails`;
@@ -56,6 +57,54 @@ beforeEach(async () => {
 describe(PrinterFilesController.name, () => {
   const gcodePath = "test/api/test-data/sample.gcode";
   const examplBambuFilePath = "test/api/test-data/sample.3mf";
+
+  describe("last print starts", () => {
+    afterEach(async () => {
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setAdvancedFileListEnabled(false);
+    });
+
+    it("should not expose print starts when the advanced file list is disabled", async () => {
+      const printer = await createTestPrinter(request);
+      const response = await request.get(`${getRoute(printer.id)}/last-print-starts`);
+      expectNotFoundResponse(response);
+    });
+
+    it("should return the latest start per exact file path for only the requested printer", async () => {
+      const printer = await createTestPrinter(request);
+      const otherPrinter = await createTestPrinter(request);
+      const settings = container.resolve<SettingsStore>(DITokens.settingsStore);
+      await settings.setAdvancedFileListEnabled(true);
+      const service = container.resolve<PrintJobService>(DITokens.printJobService);
+      await service.printJobRepository.save([
+        { printerId: printer.id, fileName: "folder/test.gcode", startedAt: new Date("2026-10-01T10:30:00Z") },
+        { printerId: printer.id, fileName: "folder/test.gcode", startedAt: new Date("2026-10-02T12:45:00Z") },
+        { printerId: printer.id, fileName: "other/test.gcode", startedAt: new Date("2026-10-03T14:00:00Z") },
+        { printerId: printer.id, fileName: "never.gcode", startedAt: null },
+        { printerId: otherPrinter.id, fileName: "folder/test.gcode", startedAt: new Date("2026-10-04T12:00:00Z") },
+      ]);
+
+      const response = await request.get(`${getRoute(printer.id)}/last-print-starts`);
+      expectOkResponse(response);
+      expect(response.body).toHaveLength(2);
+      expect(response.body).toEqual(
+        expect.arrayContaining([
+          { fileName: "folder/test.gcode", startedAt: "2026-10-02T12:45:00.000Z" },
+          { fileName: "other/test.gcode", startedAt: "2026-10-03T14:00:00.000Z" },
+        ]),
+      );
+    });
+
+    it("should return an empty list for a printer without recorded starts", async () => {
+      const printer = await createTestPrinter(request);
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setAdvancedFileListEnabled(true);
+      expectOkResponse(await request.get(`${getRoute(printer.id)}/last-print-starts`), []);
+    });
+
+    it("should resolve and reject a missing printer", async () => {
+      await container.resolve<SettingsStore>(DITokens.settingsStore).setAdvancedFileListEnabled(true);
+      expectNotFoundResponse(await request.get(`${getRoute(999999)}/last-print-starts`));
+    });
+  });
 
   it(`should return 404 on ${defaultRoute} for nonexisting printer`, async () => {
     const res = await request.get(getRoute(101)).send();

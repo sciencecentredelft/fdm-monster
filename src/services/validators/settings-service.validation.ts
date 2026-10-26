@@ -1,6 +1,13 @@
 import { isProductionEnvironment } from "@/utils/env.utils";
 import { z } from "zod";
 
+export const advancedFileListColumnsSchema = z
+  .object({
+    size: z.boolean(),
+    startedAt: z.boolean(),
+  })
+  .strict();
+
 export const serverSettingsUpdateSchema = z.object({
   registration: z.boolean(),
   loginRequired: z.boolean(),
@@ -8,6 +15,13 @@ export const serverSettingsUpdateSchema = z.object({
   experimentalBambuSupport: z.boolean(),
   experimentalPrusaLinkSupport: z.boolean(),
   sentryDiagnosticsEnabled: z.boolean(),
+  advancedFileListEnabled: z.boolean().optional(),
+  advancedFileListColumns: advancedFileListColumnsSchema.optional(),
+});
+
+export const advancedFileListSchema = z.object({
+  enabled: z.boolean(),
+  columns: advancedFileListColumnsSchema.optional(),
 });
 
 export const timeoutSettingsUpdateSchema = z.object({
