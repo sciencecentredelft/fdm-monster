@@ -62,6 +62,7 @@ export const DITokens = {
   // Stores
   floorStore: "floorStore",
   settingsStore: "settingsStore",
+  userDirectoryService: "userDirectoryService",
   printerSocketStore: "printerSocketStore",
   testPrinterSocketStore: "testPrinterSocketStore",
   prusaLinkPollingAdapter: "prusaLinkPollingAdapter",

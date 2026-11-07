@@ -7,6 +7,7 @@ import {
 } from "@/constants/server-settings.constants";
 import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
 import type { GridStatusColors } from "@/services/interfaces/settings.dto";
+import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.dto";
 
 @Entity()
 export class Settings {
@@ -28,7 +29,9 @@ export class Settings {
     checkPrinterStatusBeforePrint?: boolean;
     gridStatusColorsEnabled?: boolean;
     floorGridLockEnabled?: boolean;
+    floorGridIdleTimeoutMinutes?: number;
     gridStatusColors?: GridStatusColors;
+    userDirectoryApi?: UserDirectoryConfig;
   };
 
   @Column({ type: "simple-json", nullable: false })
@@ -38,6 +41,7 @@ export class Settings {
     refreshTokenAttempts: number;
     refreshTokenExpiry: number;
     slicerApiKey: string | null;
+    userDirectoryClientSecret?: string;
   };
 
   @Column({ type: "simple-json", nullable: false })

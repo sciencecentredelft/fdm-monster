@@ -11,6 +11,7 @@ import {
   timeoutSettingsUpdateSchema,
   wizardUpdateSchema,
 } from "@/services/validators/settings-service.validation";
+import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.dto";
 
 export interface GridStatusColors {
   ready: string;
@@ -37,6 +38,10 @@ export interface ServerSettingsDto {
   checkPrinterStatusBeforePrint?: boolean;
   gridStatusColorsEnabled?: boolean;
   floorGridLockEnabled?: boolean;
+  floorGridIdleTimeoutMinutes?: number;
+  userDirectoryApiEnabled?: boolean;
+  userDirectoryManualEntryAllowed?: boolean;
+  userDirectoryApi?: UserDirectoryConfig;
   gridStatusColors?: GridStatusColors;
 }
 

@@ -48,12 +48,17 @@ export class BatchCallController {
   @POST()
   @route("/reprint/execute")
   async batchReprintFiles(req: Request, res: Response) {
-    const { prints, assignedTo: inputAssignedTo } = await validateInput(req.body, executeBatchRePrinterSchema);
-    const assignedTo = await validatePrintAssignment(
+    const {
+      prints,
+      assignedTo: inputAssignedTo,
+      assignedEmail: inputAssignedEmail,
+    } = await validateInput(req.body, executeBatchRePrinterSchema);
+    const assignment = await validatePrintAssignment(
       this.settingsStore.getServerSettings().printAssignmentEnabled,
       inputAssignedTo,
+      inputAssignedEmail,
     );
-    const files = await this.batchCallService.batchReprintCalls(prints, assignedTo);
+    const files = await this.batchCallService.batchReprintCalls(prints, assignment);
     res.send(files);
   }
 

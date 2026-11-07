@@ -48,6 +48,7 @@ describe("admin-only configuration", () => {
     ["put", "pre-print-status-check"],
     ["put", "grid-status-colors"],
     ["put", "floor-grid-lock"],
+    ["post", "user-directory/refresh"],
     ["put", "frontend"],
     ["put", "login-required"],
     ["put", "registration-enabled"],

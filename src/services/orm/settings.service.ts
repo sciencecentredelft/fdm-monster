@@ -19,14 +19,17 @@ import {
   timeoutSettingsUpdateSchema,
   wizardUpdateSchema,
   slicerApiKeyUpdateSchema,
+  userDirectoryConfigSchema,
 } from "@/services/validators/settings-service.validation";
 import { migrateSettingsRuntime } from "@/shared/runtime-settings.migration";
 import { validateInput } from "@/handlers/validators";
 
 export class SettingsService extends BaseService(Settings, SettingsDto) implements ISettingsService {
   toDto(entity: Settings): SettingsDto {
+    const serverSettings = { ...entity[serverSettingsKey] };
+    delete serverSettings.userDirectoryApi;
     return {
-      [serverSettingsKey]: entity[serverSettingsKey],
+      [serverSettingsKey]: serverSettings,
       [frontendSettingKey]: entity[frontendSettingKey],
       [wizardSettingKey]: entity[wizardSettingKey],
       [timeoutSettingKey]: entity[timeoutSettingKey],
@@ -49,7 +52,10 @@ export class SettingsService extends BaseService(Settings, SettingsDto) implemen
   async updateServerSettings(update: z.infer<typeof serverSettingsUpdateSchema>) {
     const validatedInput = await validateInput(update, serverSettingsUpdateSchema);
     const entity = await this.getOrCreate();
-    entity[serverSettingsKey] = validatedInput;
+    entity[serverSettingsKey] = {
+      ...validatedInput,
+      userDirectoryApi: entity[serverSettingsKey].userDirectoryApi,
+    };
     await this.update(entity.id, entity);
     return entity;
   }
@@ -76,6 +82,23 @@ export class SettingsService extends BaseService(Settings, SettingsDto) implemen
     const validatedInput = await validateInput(update, slicerApiKeyUpdateSchema);
     const entity = await this.getOrCreate();
     entity[credentialSettingsKey].slicerApiKey = validatedInput.slicerApiKey;
+    await this.update(entity.id, entity);
+    return entity;
+  }
+
+  async updateUserDirectorySettings(
+    config: z.infer<typeof userDirectoryConfigSchema>,
+    clientSecret?: string,
+    clearClientSecret = false,
+  ) {
+    const validatedConfig = await validateInput(config, userDirectoryConfigSchema);
+    const entity = await this.getOrCreate();
+    entity[serverSettingsKey].userDirectoryApi = validatedConfig;
+    if (clearClientSecret) {
+      delete entity[credentialSettingsKey].userDirectoryClientSecret;
+    } else if (clientSecret !== undefined) {
+      entity[credentialSettingsKey].userDirectoryClientSecret = clientSecret;
+    }
     await this.update(entity.id, entity);
     return entity;
   }

@@ -10,6 +10,7 @@ import {
 } from "@/services/validators/settings-service.validation";
 import { z } from "zod";
 import { Settings } from "@/entities";
+import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.dto";
 
 export interface ISettingsService<Entity = Settings> {
   toDto(entity: Entity): SettingsDto;
@@ -29,4 +30,10 @@ export interface ISettingsService<Entity = Settings> {
   updateTimeoutSettings(update: z.infer<typeof timeoutSettingsUpdateSchema>): Promise<Entity>;
 
   updateSlicerApiKey(update: z.infer<typeof slicerApiKeyUpdateSchema>): Promise<Entity>;
+
+  updateUserDirectorySettings(
+    config: UserDirectoryConfig,
+    clientSecret?: string,
+    clearClientSecret?: boolean,
+  ): Promise<Entity>;
 }

@@ -7,6 +7,7 @@ import {
   frontendSettingKey,
   getDefaultFrontendSettings,
   getDefaultGridStatusColors,
+  getDefaultUserDirectoryConfig,
   serverSettingsKey,
   timeoutSettingKey,
   wizardSettingKey,
@@ -16,6 +17,7 @@ import TestAgent from "supertest/lib/agent";
 import { FrontendSettingsDto } from "@/services/interfaces/settings.dto";
 import { SettingsStore } from "@/state/settings.store";
 import { DITokens } from "@/container.tokens";
+import nock from "nock";
 
 let request: TestAgent<Test>;
 let settingsStore: SettingsStore;
@@ -36,6 +38,37 @@ beforeAll(async () => {
 });
 
 describe(SettingsController.name, () => {
+  it("refreshes cached users and invalidates them after directory settings are saved", async () => {
+    const config = {
+      ...getDefaultUserDirectoryConfig(),
+      enabled: true,
+      endpoint: "https://cache-directory.example/users",
+    };
+    expectOkResponse(await request.put(`${defaultRoute}/user-directory`).send({ config }));
+    await settingsStore.setPrintAssignmentEnabled(true);
+    try {
+      const users = [{ name: "Ada", email: "ada@example.com" }];
+      const initial = nock("https://cache-directory.example").get("/users").reply(200, { users });
+      expect((await request.get(`${defaultRoute}/user-directory/users`)).body).toEqual(users);
+      expect((await request.get(`${defaultRoute}/user-directory/users`)).body).toEqual(users);
+      expect(initial.isDone()).toBe(true);
+      const refresh = nock("https://cache-directory.example").get("/users").reply(200, { users: [] });
+      const response = await request.post(`${defaultRoute}/user-directory/refresh`).send({});
+      expectOkResponse(response);
+      expect(response.body).toEqual({ success: true, userCount: 0 });
+      expect(refresh.isDone()).toBe(true);
+      expect((await request.get(`${defaultRoute}/user-directory/users`)).body).toEqual([]);
+      expectOkResponse(await request.put(`${defaultRoute}/user-directory`).send({ config }));
+      const changed = nock("https://cache-directory.example").get("/users").reply(200, { users });
+      expect((await request.get(`${defaultRoute}/user-directory/users`)).body).toEqual(users);
+      expect(changed.isDone()).toBe(true);
+    } finally {
+      await request.put(`${defaultRoute}/user-directory`).send({ config: { ...config, enabled: false } });
+      await settingsStore.setPrintAssignmentEnabled(false);
+      nock.cleanAll();
+    }
+  });
+
   it("persists and disables grid colours without changing other settings or losing colours", async () => {
     const before = (await request.get(defaultRoute)).body.server;
     expect(before.gridStatusColorsEnabled).toBe(false);
@@ -140,6 +173,56 @@ describe(SettingsController.name, () => {
     const response = await request.get(sensitiveSettingsRoute).send();
     expect(response.body).not.toBeNull();
     expectOkResponse(response);
+  });
+
+  it("stores user directory credentials without exposing the secret in settings responses", async () => {
+    const config = {
+      ...getDefaultUserDirectoryConfig(),
+      enabled: true,
+      endpoint: "https://directory.example/users",
+      authMode: "credentials" as const,
+      credentialPlacement: "header" as const,
+      clientId: "client-123",
+      paginationEnabled: true,
+      allowManualEntry: false,
+      usersPath: "results",
+      combineNames: true,
+      firstNamePath: "profile.first_name",
+      lastNamePath: "profile.last_name",
+    };
+    const update = await request.put(`${defaultRoute}/user-directory`).send({
+      config,
+      clientSecret: "private-client-secret",
+    });
+    expectOkResponse(update);
+    expect(update.body).toEqual({ config, hasClientSecret: true });
+    expect(JSON.stringify(update.body)).not.toContain("private-client-secret");
+
+    expectOkResponse(await request.put(`${defaultRoute}/advanced-file-list`).send({ enabled: false }));
+    const updatedConfig = { ...config, endpoint: "https://directory.example/updated-users" };
+    const preserveSecret = await request.put(`${defaultRoute}/user-directory`).send({ config: updatedConfig });
+    expectOkResponse(preserveSecret);
+    expect(preserveSecret.body).toEqual({ config: updatedConfig, hasClientSecret: true });
+
+    const publicSettings = await request.get(defaultRoute);
+    expect(publicSettings.body.server.userDirectoryApiEnabled).toBe(true);
+    expect(publicSettings.body.server.userDirectoryManualEntryAllowed).toBe(false);
+    expect(JSON.stringify(publicSettings.body)).not.toContain("client-123");
+    expect(JSON.stringify(publicSettings.body)).not.toContain("private-client-secret");
+
+    const adminSettings = await request.get(`${defaultRoute}/user-directory`);
+    expectOkResponse(adminSettings);
+    expect(adminSettings.body).toEqual({ config: updatedConfig, hasClientSecret: true });
+    expect(JSON.stringify(adminSettings.body)).not.toContain("private-client-secret");
+    await settingsStore.loadSettings();
+    expect((await request.get(`${defaultRoute}/user-directory`)).body.config).toEqual(updatedConfig);
+
+    const clear = await request.put(`${defaultRoute}/user-directory`).send({
+      config: { ...updatedConfig, enabled: false },
+      clearClientSecret: true,
+    });
+    expectOkResponse(clear);
+    expect(clear.body.hasClientSecret).toBe(false);
   });
 
   it("persists the independent print assignment toggle without changing advanced list settings", async () => {

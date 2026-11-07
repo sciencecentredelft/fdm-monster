@@ -2,15 +2,55 @@ import { setupTestApp } from "../test-server";
 import { createTestPrinter } from "../api/test-data/create-printer";
 import { DITokens } from "@/container.tokens";
 import { PrintJobService } from "@/services/orm/print-job.service";
+import { SettingsStore } from "@/state/settings.store";
+import { getDefaultUserDirectoryConfig } from "@/constants/server-settings.constants";
+import nock from "nock";
 
 describe("per-print assignment", () => {
   let service: PrintJobService;
   let createPrinter: () => Promise<{ id: number }>;
+  let settings: SettingsStore;
 
   beforeAll(async () => {
     const { container, request } = await setupTestApp(true);
     service = container.resolve<PrintJobService>(DITokens.printJobService);
+    settings = container.resolve<SettingsStore>(DITokens.settingsStore);
     createPrinter = () => createTestPrinter(request);
+  });
+
+  it("requires a matching directory identity before persisting or starting an assigned print when manual names are disabled", async () => {
+    const config = {
+      ...getDefaultUserDirectoryConfig(),
+      enabled: true,
+      allowManualEntry: false,
+      endpoint: "https://assignment-directory.example/users",
+    };
+    await settings.setUserDirectorySettings(config);
+    const printer = await createPrinter();
+    const start = vi.fn(async () => {});
+    try {
+      nock("https://assignment-directory.example")
+        .get("/users")
+        .reply(200, { users: [{ name: "Ada", email: "ada@example.com" }] });
+      await expect(service.startAssignedPrint(printer.id, "test.gcode", "Typed Name", start)).rejects.toThrow(
+        "Manual assignee names are disabled",
+      );
+      await expect(
+        service.startAssignedPrint(printer.id, "test.gcode", "Forged", start, {
+          assignedEmail: "ada@example.com",
+        }),
+      ).rejects.toThrow("Manual assignee names are disabled");
+      expect(start).not.toHaveBeenCalled();
+      expect(await service.printJobRepository.countBy({ printerId: printer.id })).toBe(0);
+      const job = await service.startAssignedPrint(printer.id, "test.gcode", "Ada", start, {
+        assignedEmail: "ada@example.com",
+      });
+      expect(job.assignedTo).toBe("Ada");
+      expect(start).toHaveBeenCalledOnce();
+    } finally {
+      await settings.setUserDirectorySettings(getDefaultUserDirectoryConfig());
+      nock.cleanAll();
+    }
   });
 
   it("persists the name before an early printer event and creates only one run", async () => {
@@ -24,6 +64,22 @@ describe("per-print assignment", () => {
     expect((await service.getJobByIdOrFail(job.id)).assignedTo).toBe("Alice");
     expect(await service.printJobRepository.countBy({ printerId: printer.id, status: "PRINTING" })).toBe(1);
     expect((await service.markStarted(printer.id, "folder/test.gcode")).id).toBe(job.id);
+  });
+
+  it("persists selected email with the assignment and returns it in print-start history", async () => {
+    const printer = await createPrinter();
+    const job = await service.startAssignedPrint(printer.id, "test.gcode", "Ada Lovelace", async () => {}, {
+      assignedEmail: "ada@example.com",
+    });
+
+    expect(job).toMatchObject({ assignedTo: "Ada Lovelace", assignedEmail: "ada@example.com" });
+    expect(await service.getLastPrintStarts(printer.id)).toEqual([
+      expect.objectContaining({
+        fileName: "test.gcode",
+        assignedTo: "Ada Lovelace",
+        assignedEmail: "ada@example.com",
+      }),
+    ]);
   });
 
   it("serializes concurrent start observations against the same assigned run", async () => {

@@ -68,7 +68,9 @@ describe("grid print assignments in live updates", () => {
   it("adds assignments through one live-update query without mutating the printer cache", async () => {
     const printer = await createPrinter();
     await events.getOrCreateEvents(printer.id);
-    const job = await service.startAssignedPrint(printer.id, "test.gcode", "Alice", async () => {});
+    const job = await service.startAssignedPrint(printer.id, "test.gcode", "Alice", async () => {}, {
+      assignedEmail: "alice@example.com",
+    });
     await settings.setShowPrintAssigneeOnGrid(true);
     const lookup = vi.spyOn(service, "getActivePrintAssignments");
     const send = vi.spyOn(gateway, "send").mockImplementation(() => {});
@@ -79,7 +81,10 @@ describe("grid print assignments in live updates", () => {
       expect.objectContaining({
         printerEvents: expect.objectContaining({
           [printer.id]: expect.objectContaining({
-            currentPrintAssignment: { fileName: "test.gcode", assignedTo: "Alice" },
+            currentPrintAssignment: {
+              fileName: "test.gcode",
+              assignedTo: "Alice",
+            },
           }),
         }),
       }),

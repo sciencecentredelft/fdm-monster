@@ -1,7 +1,7 @@
 import { DELETE, GET, PATCH, POST, PUT, route, before } from "awilix-express";
-import { authenticate, authorizeRoles } from "@/middleware/authenticate";
+import { authenticate, authorizeRoles, permission } from "@/middleware/authenticate";
 import { AppConstants } from "@/server.constants";
-import { ROLES } from "@/constants/authorization.constants";
+import { PERMS, ROLES } from "@/constants/authorization.constants";
 import { validateInput } from "@/handlers/validators";
 import {
   credentialCoreSettingUpdateSchema,
@@ -14,6 +14,8 @@ import {
   advancedFileListSchema,
   printAssignmentSettingsSchema,
   gridStatusColorSettingsSchema,
+  floorGridLockSettingsSchema,
+  userDirectorySettingsUpdateSchema,
 } from "@/services/validators/settings-service.validation";
 import { SettingsStore } from "@/state/settings.store";
 import type { Request, Response } from "express";
@@ -25,6 +27,7 @@ import { BambuType, PrusaLinkType, MoonrakerType } from "@/services/printer-api.
 import type { IPrinterService } from "@/services/interfaces/printer.service.interface";
 import { PrinterThumbnailCache } from "@/state/printer-thumbnail.cache";
 import { loginRequiredSchema, registrationEnabledSchema } from "@/controllers/validation/setting.validation";
+import { UserDirectoryService } from "@/services/user-directory.service";
 
 @route(AppConstants.apiRoute + "/settings")
 @before([authenticate()])
@@ -38,6 +41,7 @@ export class SettingsController {
     private readonly printerService: IPrinterService,
     private readonly settingsStore: SettingsStore,
     private readonly printerThumbnailCache: PrinterThumbnailCache,
+    private readonly userDirectoryService: UserDirectoryService,
   ) {
     this.logger = loggerFactory(SettingsController.name);
   }
@@ -171,8 +175,55 @@ export class SettingsController {
   @route("/floor-grid-lock")
   @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
   async updateFloorGridLock(req: Request, res: Response) {
-    const { enabled } = await validateInput(req.body, printAssignmentSettingsSchema);
-    res.send(await this.settingsStore.setFloorGridLockEnabled(enabled));
+    const { enabled, idleTimeoutMinutes } = await validateInput(req.body, floorGridLockSettingsSchema);
+    res.send(await this.settingsStore.setFloorGridLockEnabled(enabled, idleTimeoutMinutes));
+  }
+
+  @GET()
+  @route("/user-directory")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async getUserDirectorySettings(req: Request, res: Response) {
+    res.send(this.settingsStore.getUserDirectorySettings());
+  }
+
+  @PUT()
+  @route("/user-directory")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async updateUserDirectorySettings(req: Request, res: Response) {
+    const update = await validateInput(req.body, userDirectorySettingsUpdateSchema);
+    const result = await this.settingsStore.setUserDirectorySettings(
+      update.config,
+      update.clientSecret,
+      update.clearClientSecret,
+    );
+    this.userDirectoryService.invalidateCache();
+    res.send(result);
+  }
+
+  @POST()
+  @route("/user-directory/test")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async testUserDirectoryConnection(req: Request, res: Response) {
+    res.send(await this.userDirectoryService.testConnection());
+  }
+
+  @POST()
+  @route("/user-directory/refresh")
+  @before([authorizeRoles([ROLES.ADMIN]), demoUserNotAllowed])
+  async refreshUserDirectory(req: Request, res: Response) {
+    const users = await this.userDirectoryService.listUsers(true);
+    res.send({ success: true, userCount: users.length });
+  }
+
+  @GET()
+  @route("/user-directory/users")
+  @before(permission(PERMS.PrinterFiles.Actions))
+  async getUserDirectoryUsers(req: Request, res: Response) {
+    if (!this.settingsStore.getServerSettings().printAssignmentEnabled) {
+      res.sendStatus(404);
+      return;
+    }
+    res.send(await this.userDirectoryService.listUsers());
   }
 
   @PUT()

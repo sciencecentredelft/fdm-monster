@@ -89,19 +89,24 @@ export class PrinterFilesController {
   @before(permission(PERMS.PrinterFiles.Actions))
   async startPrintFile(req: Request, res: Response) {
     const { currentPrinterId, currentPrinter } = getScopedPrinter(req);
-    const { filePath, assignedTo: inputAssignedTo } = await validateInput(req.body, startPrintFileSchema);
-    const assignedTo = await validatePrintAssignment(
+    const {
+      filePath,
+      assignedTo: inputAssignedTo,
+      assignedEmail: inputAssignedEmail,
+    } = await validateInput(req.body, startPrintFileSchema);
+    const assignment = await validatePrintAssignment(
       this.settingsStore.getServerSettings().printAssignmentEnabled,
       inputAssignedTo,
+      inputAssignedEmail,
     );
     const encodedFilePath = filePath.split("/").map(encodeURIComponent).join("/");
-    if (assignedTo) {
+    if (assignment) {
       await this.printJobService.startAssignedPrint(
         currentPrinterId,
         filePath,
-        assignedTo,
+        assignment.assignedTo,
         () => this.printerApi.startPrint(encodedFilePath),
-        { printerName: currentPrinter.name },
+        { printerName: currentPrinter.name, assignedEmail: assignment.assignedEmail },
       );
     } else {
       await this.printerApi.startPrint(encodedFilePath);
@@ -160,10 +165,11 @@ export class PrinterFilesController {
     const files = await this.multerService.multerLoadFileAsync(req, res, acceptedExtensions, true);
 
     // FormData has key-values with type string only
-    const { startPrint: startPrintString, assignedTo: inputAssignedTo } = await validateInput(
-      req.body,
-      uploadFileSchema,
-    );
+    const {
+      startPrint: startPrintString,
+      assignedTo: inputAssignedTo,
+      assignedEmail: inputAssignedEmail,
+    } = await validateInput(req.body, uploadFileSchema);
     const startPrint = startPrintString === "true";
 
     if (!files?.length) {
@@ -187,11 +193,12 @@ export class PrinterFilesController {
         this.logger.error(`Could not remove uploaded file from temporary storage ${errorSummary(error)}`);
       }
     };
-    let assignedTo: string | undefined;
+    let assignment: { assignedTo: string; assignedEmail: string | null } | undefined;
     try {
-      assignedTo = await validatePrintAssignment(
+      assignment = await validatePrintAssignment(
         startPrint && this.settingsStore.getServerSettings().printAssignmentEnabled,
         inputAssignedTo,
+        inputAssignedEmail,
       );
     } catch (error) {
       clearUpload();
@@ -204,12 +211,12 @@ export class PrinterFilesController {
         stream: createReadStream(uploadedFile.path),
         fileName: uploadedFile.originalname,
         contentLength: uploadedFile.size,
-        startPrint: startPrint && !assignedTo,
+        startPrint: startPrint && !assignment,
         uploadToken: token,
       });
     let assignedJob: PrintJob | undefined;
     try {
-      if (assignedTo) {
+      if (assignment) {
         const uploadedPath = await upload();
         if (!uploadedPath) {
           throw new ValidationException({
@@ -221,9 +228,9 @@ export class PrinterFilesController {
         assignedJob = await this.printJobService.startAssignedPrint(
           currentPrinterId,
           uploadedPath,
-          assignedTo,
+          assignment.assignedTo,
           () => this.printerApi.startPrint(encodedPath),
-          { printerName: currentPrinter.name, uploading: true },
+          { printerName: currentPrinter.name, uploading: true, assignedEmail: assignment.assignedEmail },
         );
       } else {
         await upload();

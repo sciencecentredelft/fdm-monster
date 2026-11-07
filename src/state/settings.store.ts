@@ -3,6 +3,7 @@ import {
   credentialSettingsKey,
   getDefaultAdvancedFileListColumns,
   getDefaultGridStatusColors,
+  getDefaultUserDirectoryConfig,
   frontendSettingKey,
   serverSettingsKey,
   timeoutSettingKey,
@@ -24,6 +25,7 @@ import {
 } from "@/services/validators/settings-service.validation";
 import { Settings } from "@/entities";
 import { v4 as uuidv4 } from "uuid";
+import type { UserDirectoryConfig, UserDirectorySettingsDto } from "@/services/interfaces/user-directory.dto";
 
 export class SettingsStore {
   private readonly logger: LoggerService;
@@ -65,6 +67,9 @@ export class SettingsStore {
         checkPrinterStatusBeforePrint: settings[serverSettingsKey].checkPrinterStatusBeforePrint ?? false,
         gridStatusColorsEnabled: settings[serverSettingsKey].gridStatusColorsEnabled ?? false,
         floorGridLockEnabled: settings[serverSettingsKey].floorGridLockEnabled ?? false,
+        floorGridIdleTimeoutMinutes: settings[serverSettingsKey].floorGridIdleTimeoutMinutes ?? 0,
+        userDirectoryApiEnabled: settings[serverSettingsKey].userDirectoryApi?.enabled ?? false,
+        userDirectoryManualEntryAllowed: settings[serverSettingsKey].userDirectoryApi?.allowManualEntry ?? true,
         gridStatusColors: settings[serverSettingsKey].gridStatusColors ?? getDefaultGridStatusColors(),
         advancedFileListColumns:
           settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
@@ -99,6 +104,7 @@ export class SettingsStore {
         checkPrinterStatusBeforePrint: settings[serverSettingsKey].checkPrinterStatusBeforePrint ?? false,
         gridStatusColorsEnabled: settings[serverSettingsKey].gridStatusColorsEnabled ?? false,
         floorGridLockEnabled: settings[serverSettingsKey].floorGridLockEnabled ?? false,
+        floorGridIdleTimeoutMinutes: settings[serverSettingsKey].floorGridIdleTimeoutMinutes ?? 0,
         gridStatusColors: settings[serverSettingsKey].gridStatusColors ?? getDefaultGridStatusColors(),
         advancedFileListColumns:
           settings[serverSettingsKey].advancedFileListColumns ?? getDefaultAdvancedFileListColumns(),
@@ -182,6 +188,24 @@ export class SettingsStore {
     return this.getSettings()[serverSettingsKey];
   }
 
+  getUserDirectorySettings(): UserDirectorySettingsDto {
+    this.throwIfSettingsUnset();
+    return {
+      config: this.settings![serverSettingsKey].userDirectoryApi ?? getDefaultUserDirectoryConfig(),
+      hasClientSecret: Boolean(this.settings![credentialSettingsKey].userDirectoryClientSecret),
+    };
+  }
+
+  getUserDirectoryClientSecret(): string | undefined {
+    this.throwIfSettingsUnset();
+    return this.settings![credentialSettingsKey].userDirectoryClientSecret;
+  }
+
+  async setUserDirectorySettings(config: UserDirectoryConfig, clientSecret?: string, clearClientSecret = false) {
+    this.settings = await this.settingsService.updateUserDirectorySettings(config, clientSecret, clearClientSecret);
+    return this.getUserDirectorySettings();
+  }
+
   getTimeoutSettings() {
     return this.getSettings()[timeoutSettingKey];
   }
@@ -257,8 +281,12 @@ export class SettingsStore {
     });
   }
 
-  async setFloorGridLockEnabled(enabled: boolean) {
-    return this.updateServerSettings({ ...this.getServerSettings(), floorGridLockEnabled: enabled });
+  async setFloorGridLockEnabled(enabled: boolean, idleTimeoutMinutes?: number) {
+    return this.updateServerSettings({
+      ...this.getServerSettings(),
+      floorGridLockEnabled: enabled,
+      floorGridIdleTimeoutMinutes: idleTimeoutMinutes ?? this.getServerSettings().floorGridIdleTimeoutMinutes ?? 0,
+    });
   }
 
   async updateTimeoutSettings(timeoutSettings: z.infer<typeof timeoutSettingsUpdateSchema>) {

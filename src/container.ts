@@ -72,6 +72,7 @@ import { PrintJobService } from "@/services/orm/print-job.service";
 import { FileAnalysisService } from "@/services/file-analysis.service";
 import { PrintJobAnalysisTask } from "@/tasks/print-job-analysis.task";
 import { PrintFileDownloaderService } from "@/services/print-file-downloader.service";
+import { UserDirectoryService } from "@/services/user-directory.service";
 
 export function configureContainer() {
   const container = createContainer({
@@ -109,6 +110,7 @@ export function configureContainer() {
     [di.serverHost]: asClass(ServerHost).singleton(),
     [di.exceptionFilter]: asClass(ExceptionFilter).singleton(),
     [di.settingsStore]: asClass(SettingsStore).singleton(),
+    [di.userDirectoryService]: asClass(UserDirectoryService).singleton(),
     [di.configService]: asClass(ConfigService),
     [di.authService]: asClass(AuthService).singleton(),
     [di.jwtService]: asClass(JwtService).singleton(),

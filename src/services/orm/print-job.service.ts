@@ -4,6 +4,7 @@ import EventEmitter2 from "eventemitter2";
 import type { ILoggerFactory } from "@/handlers/logger-factory";
 import { TypeormService } from "@/services/typeorm/typeorm.service";
 import { NotFoundException, ValidationException } from "@/exceptions/runtime.exceptions";
+import { UserDirectoryService } from "@/services/user-directory.service";
 import {
   updateStatisticsForCompletion,
   updateStatisticsForFailure,
@@ -130,7 +131,12 @@ export class PrintJobService implements IPrintJobService {
   private readonly startingPrinters = new Set<number>();
   private readonly printStartLocks = new Map<number, Promise<PrintJob>>();
 
-  constructor(loggerFactory: ILoggerFactory, typeormService: TypeormService, eventEmitter2: EventEmitter2) {
+  constructor(
+    loggerFactory: ILoggerFactory,
+    typeormService: TypeormService,
+    eventEmitter2: EventEmitter2,
+    private readonly userDirectoryService: UserDirectoryService,
+  ) {
     this.printJobRepository = typeormService.getDataSource().getRepository(PrintJob);
     this.eventEmitter2 = eventEmitter2;
     this.logger = loggerFactory(PrintJobService.name);
@@ -152,13 +158,14 @@ export class PrintJobService implements IPrintJobService {
     fileName: string,
     assignedTo: string,
     start: () => Promise<unknown>,
-    options: { printerName?: string; uploading?: boolean } = {},
+    options: { printerName?: string; uploading?: boolean; assignedEmail?: string | null } = {},
   ): Promise<PrintJob> {
     if (this.startingPrinters.has(printerId)) {
       throw new ValidationException({ error: "A print is already being started on this printer" });
     }
     this.startingPrinters.add(printerId);
     try {
+      await this.userDirectoryService.validateAssignment(assignedTo, options.assignedEmail);
       const previous = options.uploading
         ? null
         : await this.printJobRepository.findOne({
@@ -172,6 +179,7 @@ export class PrintJobService implements IPrintJobService {
           printerName: options.printerName ?? null,
           fileName,
           assignedTo,
+          assignedEmail: options.assignedEmail ?? null,
           status: "STARTING",
           analysisState: options.uploading ? "ANALYZING" : (previous?.analysisState ?? "NOT_ANALYZED"),
           metadata: previous?.metadata ?? null,
@@ -594,18 +602,20 @@ export class PrintJobService implements IPrintJobService {
 
   async getLastPrintStarts(
     printerId: number,
-  ): Promise<{ fileName: string; startedAt: string; assignedTo: string | null }[]> {
-    return this.printJobRepository.manager
+  ): Promise<{ fileName: string; startedAt: string; assignedTo: string | null; assignedEmail?: string | null }[]> {
+    const starts = await this.printJobRepository.manager
       .createQueryBuilder()
       .select("latest.fileName", "fileName")
       .addSelect("strftime('%Y-%m-%dT%H:%M:%fZ', latest.startedAt)", "startedAt")
       .addSelect("latest.assignedTo", "assignedTo")
+      .addSelect("latest.assignedEmail", "assignedEmail")
       .from(
         (query) =>
           query
             .select("job.fileName", "fileName")
             .addSelect("job.startedAt", "startedAt")
             .addSelect("job.assignedTo", "assignedTo")
+            .addSelect("job.assignedEmail", "assignedEmail")
             .addSelect(
               "ROW_NUMBER() OVER (PARTITION BY job.fileName ORDER BY job.startedAt DESC, job.id DESC)",
               "position",
@@ -616,7 +626,11 @@ export class PrintJobService implements IPrintJobService {
         "latest",
       )
       .where("latest.position = 1")
-      .getRawMany<{ fileName: string; startedAt: string; assignedTo: string | null }>();
+      .getRawMany<{ fileName: string; startedAt: string; assignedTo: string | null; assignedEmail: string | null }>();
+    return starts.map(({ assignedEmail, ...start }) => ({
+      ...start,
+      ...(assignedEmail ? { assignedEmail } : {}),
+    }));
   }
 
   async markStarted(printerId: number, fileName: string, printerName?: string): Promise<PrintJob> {

@@ -20,6 +20,7 @@ describe("floor grid convenience locks", () => {
 
   it("defaults off and persists the independent setting", async () => {
     expect(settings.getServerSettings().floorGridLockEnabled).toBe(false);
+    expect(settings.getServerSettings().floorGridIdleTimeoutMinutes).toBe(0);
     const response = await app.request.put("/api/v2/settings/floor-grid-lock").send({ enabled: true });
     expectOkResponse(response);
     await settings.loadSettings();
@@ -30,6 +31,37 @@ describe("floor grid convenience locks", () => {
   it.each([{}, { enabled: "true" }, { enabled: null }])("rejects invalid toggle %j", async (body) => {
     expectInvalidResponse(await app.request.put("/api/v2/settings/floor-grid-lock").send(body));
   });
+
+  it("persists an inactivity timeout and preserves it when toggling the master setting", async () => {
+    const before = settings.getServerSettings();
+    const response = await app.request
+      .put("/api/v2/settings/floor-grid-lock")
+      .send({ enabled: true, idleTimeoutMinutes: 1 });
+    expectOkResponse(response);
+    expect(response.body.server).toEqual({ ...before, floorGridIdleTimeoutMinutes: 1 });
+    await settings.loadSettings();
+    expect(settings.getSettings().server.floorGridIdleTimeoutMinutes).toBe(1);
+    expect(settings.getSettingsSensitive().server.floorGridIdleTimeoutMinutes).toBe(1);
+    expectOkResponse(await app.request.put("/api/v2/settings/floor-grid-lock").send({ enabled: false }));
+    expect(settings.getSettings().server.floorGridIdleTimeoutMinutes).toBe(1);
+    expectOkResponse(await app.request.put("/api/v2/settings/floor-grid-lock").send({ enabled: true }));
+    expect(settings.getSettings().server.floorGridIdleTimeoutMinutes).toBe(1);
+    expectOkResponse(
+      await app.request.put("/api/v2/settings/floor-grid-lock").send({ enabled: true, idleTimeoutMinutes: 0 }),
+    );
+    expect(settings.getSettings().server.floorGridIdleTimeoutMinutes).toBe(0);
+  });
+
+  it.each([-1, 0.5, "1", null, 9007199254740992])(
+    "rejects invalid inactivity timeout %j",
+    async (idleTimeoutMinutes) => {
+      const before = settings.getSettings();
+      expectInvalidResponse(
+        await app.request.put("/api/v2/settings/floor-grid-lock").send({ enabled: true, idleTimeoutMinutes }),
+      );
+      expect(settings.getSettings()).toEqual(before);
+    },
+  );
 
   it("hashes passwords, never serializes them, and verifies exact passwords", async () => {
     const floor = await createTestFloor(app.request, "Protected group", 1);
@@ -142,7 +174,7 @@ describe("floor grid convenience locks", () => {
           await app.request
             .put("/api/v2/settings/floor-grid-lock")
             .set("Authorization", authorization)
-            .send({ enabled: false })
+            .send({ enabled: false, idleTimeoutMinutes: 1 })
         ).status,
       ).toBe(403);
       expect(

@@ -2,6 +2,40 @@ import { getDefaultSettings } from "@/constants/server-settings.constants";
 import { migrateSettingsRuntime } from "@/shared/runtime-settings.migration";
 
 describe("advanced file list settings migration", () => {
+  it("adds directory pagination and name defaults without changing a saved integration", () => {
+    const settings = getDefaultSettings();
+    const config = settings.server.userDirectoryApi!;
+    config.endpoint = "https://directory.example/users";
+    config.namePath = "profile.full_name";
+    for (const key of [
+      "paginationEnabled",
+      "pageNumberParameter",
+      "pageSizeParameter",
+      "pageSize",
+      "countPath",
+      "pageNumberPath",
+      "pageSizePath",
+      "combineNames",
+      "firstNamePath",
+      "lastNamePath",
+    ]) {
+      Reflect.deleteProperty(config, key);
+    }
+    const migrated = migrateSettingsRuntime(settings).server.userDirectoryApi!;
+    expect(migrated).toMatchObject({
+      endpoint: "https://directory.example/users",
+      namePath: "profile.full_name",
+      paginationEnabled: false,
+      combineNames: false,
+      pageSize: 50,
+      countPath: "count",
+      pageNumberPath: "page_number",
+      pageSizePath: "page_size",
+      firstNamePath: "first_name",
+      lastNamePath: "last_name",
+    });
+  });
+
   it("defaults an existing installation to the normal file list", () => {
     const settings = getDefaultSettings();
     delete settings.server.advancedFileListEnabled;
@@ -12,6 +46,7 @@ describe("advanced file list settings migration", () => {
     delete settings.server.gridStatusColorsEnabled;
     delete settings.server.gridStatusColors;
     delete settings.server.floorGridLockEnabled;
+    delete settings.server.floorGridIdleTimeoutMinutes;
     expect(migrateSettingsRuntime(settings).server.advancedFileListEnabled).toBe(false);
     expect(settings.server.advancedFileListColumns).toEqual({ size: true, startedAt: true });
     expect(settings.server.printAssignmentEnabled).toBe(false);
@@ -19,7 +54,15 @@ describe("advanced file list settings migration", () => {
     expect(settings.server.checkPrinterStatusBeforePrint).toBe(false);
     expect(settings.server.gridStatusColorsEnabled).toBe(false);
     expect(settings.server.floorGridLockEnabled).toBe(false);
+    expect(settings.server.floorGridIdleTimeoutMinutes).toBe(0);
     expect(settings.server.gridStatusColors?.ready).toBe("#2E7D32");
+  });
+
+  it("preserves the grid inactivity timeout even with floor grid locks disabled", () => {
+    const settings = getDefaultSettings();
+    settings.server.floorGridIdleTimeoutMinutes = 1;
+    expect(migrateSettingsRuntime(settings).server.floorGridIdleTimeoutMinutes).toBe(1);
+    expect(settings.server.floorGridLockEnabled).toBe(false);
   });
 
   it("preserves an enabled status check independently of assignment", () => {

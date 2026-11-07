@@ -202,13 +202,28 @@ describe(PrinterFilesController.name, () => {
       const printer = await createTestPrinter(request);
       const filePath = "folder/test #.gcode";
       nock(printer.printerURL).post("/api/files/local/folder/test%20%23.gcode").reply(200);
-      expectOkResponse(await request.post(printFileRoute(printer.id)).send({ filePath, assignedTo: "  Alice  " }));
+      expectOkResponse(
+        await request.post(printFileRoute(printer.id)).send({
+          filePath,
+          assignedTo: "  Alice  ",
+          assignedEmail: "alice@example.com",
+        }),
+      );
       const [job] = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
-      expect(job).toMatchObject({ fileName: filePath, assignedTo: "Alice", status: "PRINTING" });
+      expect(job).toMatchObject({
+        fileName: filePath,
+        assignedTo: "Alice",
+        assignedEmail: "alice@example.com",
+        status: "PRINTING",
+      });
       const details = await request.get(`${AppConstants.apiRoute}/print-jobs/${job.id}`);
       expectOkResponse(details);
       expect(details.body.assignedTo).toBe("Alice");
+      expect(details.body.assignedEmail).toBe("alice@example.com");
       expect((await request.get(`${getRoute(printer.id)}/last-print-starts`)).body[0].assignedTo).toBe("Alice");
+      expect((await request.get(`${getRoute(printer.id)}/last-print-starts`)).body[0].assignedEmail).toBe(
+        "alice@example.com",
+      );
     });
 
     it("requires a name for Upload and Print but not upload-only", async () => {

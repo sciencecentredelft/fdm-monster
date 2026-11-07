@@ -30,6 +30,7 @@ import { AddPrinterMaintenanceLog1767909428129 } from "@/migrations/176790942812
 import { AddApiKey1778446203015 } from "@/migrations/1778446203015-AddApiKey";
 import { AddPrintJobAssignment1778446203016 } from "@/migrations/1778446203016-AddPrintJobAssignment";
 import { AddFloorGridLock1778446203017 } from "@/migrations/1778446203017-AddFloorGridLock";
+import { AddPrintJobAssignedEmail1778446203018 } from "@/migrations/1778446203018-AddPrintJobAssignedEmail";
 
 const databaseFilePath = getDatabaseFilePath();
 
@@ -74,6 +75,7 @@ export const AppDataSource = new DataSource({
     AddApiKey1778446203015,
     AddPrintJobAssignment1778446203016,
     AddFloorGridLock1778446203017,
+    AddPrintJobAssignedEmail1778446203018,
   ],
   subscribers: [],
 });

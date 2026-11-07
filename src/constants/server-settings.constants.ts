@@ -7,6 +7,7 @@ import {
   WizardSettingsDto,
 } from "@/services/interfaces/settings.dto";
 import { v4 as uuidv4 } from "uuid";
+import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.dto";
 
 export const wizardSettingKey = "wizard";
 export const getDefaultWizardSettings = (): WizardSettingsDto => ({
@@ -27,6 +28,35 @@ export const getDefaultGridStatusColors = () => ({
   disabled: "#303030",
   maintenance: "#EF6C00",
 });
+export const getDefaultUserDirectoryConfig = (): UserDirectoryConfig => ({
+  enabled: false,
+  allowManualEntry: true,
+  endpoint: "",
+  method: "GET",
+  authMode: "none",
+  credentialPlacement: "form",
+  clientId: "",
+  clientIdField: "client_id",
+  clientSecretField: "client_secret",
+  tokenEndpoint: "",
+  tokenCredentialPlacement: "form",
+  scope: "",
+  accessTokenPath: "access_token",
+  tokenTypePath: "token_type",
+  usersPath: "users",
+  namePath: "name",
+  emailPath: "email",
+  paginationEnabled: false,
+  pageNumberParameter: "page_number",
+  pageSizeParameter: "page_size",
+  pageSize: 50,
+  countPath: "count",
+  pageNumberPath: "page_number",
+  pageSizePath: "page_size",
+  combineNames: false,
+  firstNamePath: "first_name",
+  lastNamePath: "last_name",
+});
 export const getDefaultServerSettings = (): ServerSettingsDto => ({
   sentryDiagnosticsEnabled: false,
   loginRequired: true,
@@ -40,6 +70,8 @@ export const getDefaultServerSettings = (): ServerSettingsDto => ({
   checkPrinterStatusBeforePrint: false,
   gridStatusColorsEnabled: false,
   floorGridLockEnabled: false,
+  floorGridIdleTimeoutMinutes: 0,
+  userDirectoryApi: getDefaultUserDirectoryConfig(),
   gridStatusColors: getDefaultGridStatusColors(),
   advancedFileListColumns: getDefaultAdvancedFileListColumns(),
 });

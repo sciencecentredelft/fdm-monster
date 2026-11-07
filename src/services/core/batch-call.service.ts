@@ -153,7 +153,7 @@ export class BatchCallService {
 
   async batchReprintCalls(
     printerIdFileList: { printerId: number; path: string }[],
-    assignedTo?: string,
+    assignment?: { assignedTo: string; assignedEmail: string | null },
   ): Promise<Awaited<BatchModel>> {
     const promises = [];
     for (const printerIdFile of printerIdFileList) {
@@ -163,8 +163,16 @@ export class BatchCallService {
       const time = Date.now();
       const client = this.getPrinter(login);
       const promise = (
-        assignedTo
-          ? this.printJobService.startAssignedPrint(printerId, path, assignedTo, () => client.startPrint(path))
+        assignment
+          ? this.printJobService.startAssignedPrint(
+              printerId,
+              path,
+              assignment.assignedTo,
+              () => client.startPrint(path),
+              {
+                assignedEmail: assignment.assignedEmail,
+              },
+            )
           : client.startPrint(path)
       )
         .then(() => {

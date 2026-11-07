@@ -5,6 +5,7 @@ import {
   getDefaultFrontendSettings,
   getDefaultServerSettings,
   getDefaultTimeout,
+  getDefaultUserDirectoryConfig,
   getDefaultWizardSettings,
   serverSettingsKey,
   timeoutSettingKey,
@@ -34,7 +35,6 @@ export function migrateSettingsRuntime(knownSettings: Partial<Settings>): Settin
     // Verification and signing of JWT tokens, can be changed on the fly
     jwtSecret: uuidv4(),
   };
-
   if (entity[frontendSettingKey]) {
     const defaultFrontendSettings = getDefaultFrontendSettings();
 
@@ -76,6 +76,9 @@ export function migrateSettingsRuntime(knownSettings: Partial<Settings>): Settin
         entity[serverSettingsKey].gridStatusColorsEnabled ?? defaultServerSettings.gridStatusColorsEnabled,
       floorGridLockEnabled:
         entity[serverSettingsKey].floorGridLockEnabled ?? defaultServerSettings.floorGridLockEnabled,
+      floorGridIdleTimeoutMinutes:
+        entity[serverSettingsKey].floorGridIdleTimeoutMinutes ?? defaultServerSettings.floorGridIdleTimeoutMinutes,
+      userDirectoryApi: { ...getDefaultUserDirectoryConfig(), ...entity[serverSettingsKey].userDirectoryApi },
       gridStatusColors: { ...defaultServerSettings.gridStatusColors, ...entity[serverSettingsKey].gridStatusColors },
       advancedFileListColumns:
         entity[serverSettingsKey].advancedFileListColumns ?? defaultServerSettings.advancedFileListColumns,
