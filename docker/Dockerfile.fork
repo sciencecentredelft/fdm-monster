@@ -1,0 +1,45 @@
+FROM node:24-bookworm-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+FROM base AS client-build
+WORKDIR /build/client
+COPY --from=client-source package.json yarn.lock .yarnrc.yml ./
+COPY --from=client-source .yarn/releases ./.yarn/releases
+RUN node .yarn/releases/yarn-4.18.1.cjs install --immutable
+COPY --from=client-source src ./src
+COPY --from=client-source public ./public
+COPY --from=client-source index.html tsconfig.json tsconfig.node.json vite.config.ts ./
+RUN node .yarn/releases/yarn-4.18.1.cjs run build
+
+FROM base AS server-build
+WORKDIR /build/server
+COPY package.json yarn.lock .yarnrc.yml vite.config.ts tsconfig.json ./
+COPY .yarn/releases ./.yarn/releases
+COPY packages ./packages
+COPY src ./src
+RUN node .yarn/releases/yarn-4.18.1.cjs install --immutable \
+    && node .yarn/releases/yarn-4.18.1.cjs run build \
+    && node .yarn/releases/yarn-4.18.1.cjs workspaces focus --all --production
+
+FROM base AS runtime
+ENV NODE_ENV=production \
+    SERVER_PORT=4000 \
+    DATABASE_PATH=/app/database \
+    MEDIA_PATH=/app/media
+WORKDIR /app
+COPY --from=server-build /build/server/package.json ./
+COPY --from=server-build /build/server/node_modules ./node_modules
+COPY --from=server-build /build/server/packages ./packages
+COPY --from=server-build /build/server/dist ./dist
+COPY --from=client-build /build/client/dist /opt/fork-client/dist
+COPY --from=client-build /build/client/package.json /opt/fork-client/package.json
+COPY docker/entrypoint.fork.sh /usr/local/bin/entrypoint.fork.sh
+RUN mkdir -p /app/database /app/media \
+    && chown -R node:node /app/database /app/media \
+    && chmod +x /usr/local/bin/entrypoint.fork.sh
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:'+process.env.SERVER_PORT+'/api/v2/auth/login-required').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/entrypoint.fork.sh"]

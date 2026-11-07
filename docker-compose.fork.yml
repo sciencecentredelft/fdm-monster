@@ -1,0 +1,32 @@
+name: science-centre-fdm
+
+services:
+  fdm-monster:
+    image: science-centre-fdm:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.fork
+      additional_contexts:
+        client-source: ../fdm-monster-client-next
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${FDM_BIND_ADDRESS:-127.0.0.1}:${FDM_PORT:-4000}:4000"
+    environment:
+      NODE_ENV: production
+      SERVER_PORT: "4000"
+      DATABASE_PATH: /app/database
+      DATABASE_FILE: fdm-monster.sqlite
+      MEDIA_PATH: /app/media
+      OVERRIDE_LOGIN_REQUIRED: "true"
+      OVERRIDE_REGISTRATION_ENABLED: "false"
+      OVERRIDE_IS_DEMO_MODE: "false"
+      ENABLE_CLIENT_DIST_AUTO_UPDATE: "false"
+      INSTANCE_LABEL: Science Centre Printer Farm
+    volumes:
+      - farm-database:/app/database
+      - farm-media:/app/media
+
+volumes:
+  farm-database:
+  farm-media:
