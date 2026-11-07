@@ -8,7 +8,7 @@ services:
       dockerfile: docker/Dockerfile.fork
       additional_contexts:
         client-source: ../fdm-monster-client-next
-    restart: unless-stopped
+    restart: always
     stop_grace_period: 30s
     ports:
       - "${FDM_BIND_ADDRESS:-127.0.0.1}:${FDM_PORT:-4000}:4000"

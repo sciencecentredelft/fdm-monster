@@ -69,8 +69,12 @@ does not encrypt passwords or API credentials in browser requests.
 Use printer controller **LAN addresses**, not `localhost` (which means the
 container itself). Prefer stable IPs or DNS; broadcast/mDNS discovery does not
 necessarily cross Docker networks. Docker Desktop users must keep the host awake,
-Docker running, and verify startup after reboot. `restart: unless-stopped` applies
-when the Docker engine is available; health status alone does not restart a process.
+Docker running, and verify startup after reboot. `restart: always` restarts an
+exited container and starts it again when Docker restarts, even if it was manually
+stopped before the engine restart. A manual stop suppresses restarts until Docker
+or the container is started again. Health status alone does not restart a frozen
+process. For maintenance across engine restarts, use Compose `down` without `-v`;
+this removes the container but preserves the farm volumes.
 
 ## Persistent data and custom-client protection
 
