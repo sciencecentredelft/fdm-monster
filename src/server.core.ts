@@ -45,6 +45,16 @@ export async function setupServer() {
           const delta = process.hrtime(start);
           const duration = delta[0] + delta[1] / 1e9;
           const logger = new LoggerService("HttpRequest");
+          if (res.statusCode >= 400 && res.statusCode <= 599) {
+            logger.warn("API request failed", {
+              meta: {
+                method: req.method,
+                path: req.path,
+                statusCode: res.statusCode,
+                clientIp: req.ip ?? req.socket.remoteAddress ?? "unknown",
+              },
+            });
+          }
           logger.newDebug({
             message: `HTTP request ${req.method} ${req.originalUrl} ${res.statusCode}`,
             method: req.method,

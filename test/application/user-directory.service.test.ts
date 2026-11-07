@@ -5,6 +5,8 @@ import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.d
 import { UserDirectoryService } from "@/services/user-directory.service";
 import type { SettingsStore } from "@/state/settings.store";
 import { userDirectoryConfigSchema } from "@/services/validators/settings-service.validation";
+import { LoggerFactory } from "@/handlers/logger-factory";
+import { LoggerService } from "@/handlers/logger";
 
 const clientSecret = "test-client-secret";
 
@@ -14,7 +16,7 @@ function createService(config: Partial<UserDirectoryConfig>, secret = clientSecr
     getUserDirectorySettings: () => ({ config: resolvedConfig, hasClientSecret: !!secret }),
     getUserDirectoryClientSecret: () => secret,
   } as unknown as SettingsStore;
-  return new UserDirectoryService(store);
+  return new UserDirectoryService(store, LoggerFactory());
 }
 
 afterEach(() => {
@@ -26,6 +28,136 @@ afterEach(() => {
 describe(UserDirectoryService.name, () => {
   const cacheConfig = { enabled: true, endpoint: "https://directory.example/users" };
   const cachedPerson = { name: "Ada", email: "ada@example.com" };
+
+  it("logs OAuth redirect diagnostics without credentials, URL paths, or response data", async () => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    const redirect = nock("https://auth.example").post("/private-path").query({ secret: clientSecret }).reply(
+      301,
+      { access_token: "private-token" },
+      {
+        Location: "https://other.example/private-person?token=private-token#private-fragment",
+      },
+    );
+    await expect(
+      createService({
+        ...cacheConfig,
+        authMode: "oauth2",
+        clientId: "private-client-id",
+        tokenEndpoint: `https://auth.example/private-path?secret=${clientSecret}`,
+        scope: "private-scope",
+      }).testConnection(),
+    ).rejects.toThrow("HTTP 301");
+    expect(redirect.isDone()).toBe(true);
+    expect(warn).toHaveBeenCalledWith("User directory request failed", {
+      meta: expect.objectContaining({
+        stage: "oauth-token",
+        authMode: "oauth2",
+        credentialPlacement: "form",
+        scopeConfigured: true,
+        method: "POST",
+        origin: "https://auth.example",
+        status: 301,
+        elapsedMs: expect.any(Number),
+        redirectLocationPresent: true,
+        redirectOrigin: "https://other.example",
+        redirectSameOrigin: false,
+      }),
+    });
+    const logs = JSON.stringify(warn.mock.calls);
+    for (const sensitive of [
+      clientSecret,
+      "private-token",
+      "private-path",
+      "private-person",
+      "private-client-id",
+      "private-scope",
+    ]) {
+      expect(logs).not.toContain(sensitive);
+    }
+  });
+
+  it("identifies the failed user page and never logs returned user records", async () => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    nock("https://directory.example")
+      .get("/users")
+      .query({ page_number: 1, page_size: 1 })
+      .reply(200, { count: 2, page_number: 1, page_size: 1, results: [cachedPerson] })
+      .get("/users")
+      .query({ page_number: 2, page_size: 1 })
+      .reply(403, { users: [cachedPerson] });
+    await expect(
+      createService({
+        ...cacheConfig,
+        paginationEnabled: true,
+        pageSize: 1,
+        usersPath: "results",
+      }).listUsers(),
+    ).rejects.toThrow("HTTP 403");
+    expect(warn).toHaveBeenCalledWith("User directory request failed", {
+      meta: expect.objectContaining({ stage: "users", method: "GET", page: 2, status: 403 }),
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(cachedPerson.email);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(cachedPerson.name);
+  });
+
+  it.each([
+    { location: "/users/?secret=private-query", valid: true, origin: "https://directory.example", sameOrigin: true },
+    { location: "http://[invalid", valid: false, origin: undefined, sameOrigin: undefined },
+  ])("sanitizes relative and malformed redirect locations: $valid", async ({ location, valid, origin, sameOrigin }) => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    nock("https://directory.example").get("/users").reply(301, "", { Location: location });
+    await expect(createService(cacheConfig).listUsers()).rejects.toThrow("HTTP 301");
+    expect(warn).toHaveBeenCalledWith("User directory request failed", {
+      meta: expect.objectContaining({
+        redirectLocationPresent: true,
+        redirectLocationValid: valid,
+        redirectOrigin: origin,
+        redirectSameOrigin: sameOrigin,
+      }),
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(location);
+  });
+
+  it("logs mapping failures without exposing malformed values", async () => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    nock("https://directory.example")
+      .get("/users")
+      .reply(200, {
+        users: [{ name: "private-name", email: { secret: clientSecret } }],
+      });
+    await expect(createService(cacheConfig).listUsers()).rejects.toThrow("missing the configured name or email");
+    expect(warn).toHaveBeenCalledWith("User directory lookup failed", {
+      meta: { reason: "Directory API user at index 0 is missing the configured name or email" },
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-name");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(clientSecret);
+  });
+
+  it("logs network failure classification without raw error messages", async () => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    nock("https://directory.example")
+      .get("/users")
+      .replyWithError({
+        code: "ECONNREFUSED",
+        message: `request leaked ${clientSecret}`,
+      });
+    await expect(createService(cacheConfig).listUsers()).rejects.toThrow("Could not reach");
+    expect(warn).toHaveBeenCalledWith("User directory request failed", {
+      meta: expect.objectContaining({ stage: "users", failure: "network-or-tls" }),
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(clientSecret);
+  });
+
+  it("does not emit production warnings for successful or cached lookups", async () => {
+    const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+    nock("https://directory.example")
+      .get("/users")
+      .reply(200, { users: [cachedPerson] });
+    const service = createService(cacheConfig);
+    await service.testConnection();
+    await service.listUsers();
+    expect(warn).not.toHaveBeenCalled();
+  });
 
   it("shares concurrent lookups and caches users until exactly 24 hours after completion", async () => {
     let now = 1000;

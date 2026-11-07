@@ -2,6 +2,8 @@ import axios, { type AxiosRequestConfig } from "axios";
 import { BadRequestException } from "@/exceptions/runtime.exceptions";
 import { SettingsStore } from "@/state/settings.store";
 import type { UserDirectoryConfig, UserDirectoryPerson } from "@/services/interfaces/user-directory.dto";
+import type { ILoggerFactory } from "@/handlers/logger-factory";
+import type { LoggerService } from "@/handlers/logger";
 
 const requestTimeoutMs = 10_000;
 const maxResponseBytes = 1_048_576;
@@ -10,13 +12,26 @@ const maxUsers = 10_000;
 const cacheDurationMs = 24 * 60 * 60 * 1000;
 
 type JsonRecord = Record<string, unknown>;
+type RequestContext = {
+  stage: "oauth-token" | "users";
+  authMode: UserDirectoryConfig["authMode"];
+  credentialPlacement: string;
+  scopeConfigured: boolean;
+  page?: number;
+};
 
 export class UserDirectoryService {
   private cachedUsers?: { users: UserDirectoryPerson[]; expiresAt: number };
   private pendingUsers?: Promise<UserDirectoryPerson[]>;
   private cacheRevision = 0;
+  private readonly logger: LoggerService;
 
-  constructor(private readonly settingsStore: SettingsStore) {}
+  constructor(
+    private readonly settingsStore: SettingsStore,
+    loggerFactory: ILoggerFactory,
+  ) {
+    this.logger = loggerFactory(UserDirectoryService.name);
+  }
 
   async validateAssignment(name: string, email?: string | null): Promise<void> {
     const config = this.settingsStore.getUserDirectorySettings().config;
@@ -42,13 +57,22 @@ export class UserDirectoryService {
     }
     this.cachedUsers = undefined;
     const revision = this.cacheRevision;
-    const pending = this.fetchUsers(config).then((users) => {
-      if (revision !== this.cacheRevision) {
-        throw new BadRequestException("Directory settings changed during the lookup. Please retry");
-      }
-      this.cachedUsers = { users, expiresAt: Date.now() + cacheDurationMs };
-      return users;
-    });
+    const pending = this.fetchUsers(config)
+      .then((users) => {
+        if (revision !== this.cacheRevision) {
+          throw new BadRequestException("Directory settings changed during the lookup. Please retry");
+        }
+        this.cachedUsers = { users, expiresAt: Date.now() + cacheDurationMs };
+        return users;
+      })
+      .catch((error: unknown) => {
+        this.logger.warn("User directory lookup failed", {
+          meta: {
+            reason: error instanceof BadRequestException ? error.message : "Unexpected directory processing error",
+          },
+        });
+        throw error;
+      });
     this.pendingUsers = pending;
     try {
       return await pending;
@@ -70,7 +94,13 @@ export class UserDirectoryService {
         endpoint.searchParams.set(config.pageNumberParameter, String(page));
         endpoint.searchParams.set(config.pageSizeParameter, String(pageSize));
       }
-      const response = await this.request(endpoint.toString(), request, signal);
+      const response = await this.request(endpoint.toString(), request, signal, {
+        stage: "users",
+        authMode: config.authMode,
+        credentialPlacement: config.authMode === "credentials" ? config.credentialPlacement : "none",
+        scopeConfigured: !!config.scope,
+        page,
+      });
       const entries = this.getPath(response.data, config.usersPath);
       if (!Array.isArray(entries)) {
         throw new BadRequestException("Directory API response did not contain a users array at the configured path");
@@ -181,7 +211,12 @@ export class UserDirectoryService {
       };
     }
 
-    const tokenResponse = await this.request(config.tokenEndpoint, tokenRequest, signal);
+    const tokenResponse = await this.request(config.tokenEndpoint, tokenRequest, signal, {
+      stage: "oauth-token",
+      authMode: config.authMode,
+      credentialPlacement: config.tokenCredentialPlacement,
+      scopeConfigured: !!config.scope,
+    });
     const accessToken = this.getPath(tokenResponse.data, config.accessTokenPath);
     const tokenType = this.getPath(tokenResponse.data, config.tokenTypePath);
     if (typeof accessToken !== "string" || !accessToken.trim()) {
@@ -238,7 +273,8 @@ export class UserDirectoryService {
     return request;
   }
 
-  private async request(url: string, requestConfig: AxiosRequestConfig, signal: AbortSignal) {
+  private async request(url: string, requestConfig: AxiosRequestConfig, signal: AbortSignal, context: RequestContext) {
+    const startedAt = Date.now();
     try {
       return await axios.request({
         ...requestConfig,
@@ -253,6 +289,42 @@ export class UserDirectoryService {
     } catch (error) {
       if (!axios.isAxiosError(error)) throw error;
       const status = error.response?.status;
+      const location: unknown = error.response?.headers.location;
+      let redirectOrigin: string | undefined;
+      let redirectSameOrigin: boolean | undefined;
+      let redirectLocationPresent = false;
+      let redirectLocationValid = false;
+      if (status && status >= 300 && status < 400 && typeof location === "string") {
+        redirectLocationPresent = true;
+        if (URL.canParse(location, url)) {
+          const redirect = new URL(location, url);
+          if (["http:", "https:"].includes(redirect.protocol)) {
+            redirectLocationValid = true;
+            redirectOrigin = redirect.origin;
+            redirectSameOrigin = redirect.origin === new URL(url).origin;
+          }
+        }
+      }
+      this.logger.warn("User directory request failed", {
+        meta: {
+          ...context,
+          method: requestConfig.method,
+          origin: new URL(url).origin,
+          status,
+          elapsedMs: Date.now() - startedAt,
+          failure: signal.aborted
+            ? "lookup-timeout"
+            : status
+              ? "http-response"
+              : error.code === "ECONNABORTED" || error.code === "ETIMEDOUT"
+                ? "request-timeout"
+                : "network-or-tls",
+          redirectLocationPresent,
+          redirectLocationValid,
+          redirectOrigin,
+          redirectSameOrigin,
+        },
+      });
       throw new BadRequestException(
         signal.aborted
           ? "Directory API lookup exceeded the 30-second time limit"

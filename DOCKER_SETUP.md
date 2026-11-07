@@ -230,5 +230,27 @@ Backup restoration loses later changes.
 - **Directory errors:** check logs, URL reachability, scopes and response paths.
   Each lookup is limited to 30 seconds, 100 pages and 10,000 users; partial results
   are not silently returned.
+  After deploying the logging changes, run
+  `docker compose -f docker-compose.fork.yml logs --since=5m -f fdm-monster`,
+  then use **Save**, followed by **Test connection** in the directory settings.
+  `UserDirectoryService` warnings distinguish `oauth-token` from `users`
+  requests, with method, endpoint origin, status, elapsed milliseconds, auth mode,
+  credential placement, whether scopes are configured, and the failing user page.
+  Redirect diagnostics include only the destination origin and whether it matches
+  the request origin; use the API's canonical URL because redirects are not followed.
+  Lookup warnings also explain missing token fields, invalid user mapping, or
+  inconsistent pagination. Successful/cached lookups do not emit warnings.
+  These logs omit URL paths/query strings, credentials, token values, bodies and
+  user records. Endpoint hostnames are still operational information: redact them
+  as appropriate before sharing. Rebuild/recreate the container to deploy changes;
+  refreshing the browser alone cannot update backend logging.
 - **Logs:** `docker compose -f docker-compose.fork.yml logs`; persistent file logs
   are in the media volume. Logs may contain sensitive operational details.
+  Failed API responses (HTTP 400-599) produce a `HttpRequest` warning with caller
+  IP, method, path without query parameters, and status. This also covers missing
+  endpoints such as `/api/v1/printer`. Request bodies and credentials are not
+  included in these warnings. Docker NAT or a reverse proxy may cause the IP to
+  identify a gateway/proxy instead of the original computer. Forwarded headers
+  are not trusted by default; use proxy access logs to trace callers behind a
+  proxy rather than enabling unrestricted proxy trust. Treat IP addresses as
+  sensitive when sharing logs.
