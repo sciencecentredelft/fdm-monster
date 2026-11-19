@@ -9,6 +9,7 @@ import {
   startPrintFileSchema,
   uploadFileSchema,
 } from "./validation/printer-files-controller.validation";
+import { recordPrinterUploadStage } from "@/middleware/printer-upload-diagnostics";
 import { NotFoundException, ValidationException } from "@/exceptions/runtime.exceptions";
 import { printerResolveMiddleware } from "@/middleware/printer";
 import { PERMS, ROLES } from "@/constants/authorization.constants";
@@ -162,7 +163,9 @@ export class PrinterFilesController {
     const { currentPrinterId, currentPrinter } = getScopedPrinter(req);
 
     const acceptedExtensions = this.getAcceptedFileExtensions(currentPrinter.printerType);
+    recordPrinterUploadStage(res, "reading-multipart");
     const files = await this.multerService.multerLoadFileAsync(req, res, acceptedExtensions, true);
+    recordPrinterUploadStage(res, "validating-upload");
 
     // FormData has key-values with type string only
     const {
@@ -195,6 +198,7 @@ export class PrinterFilesController {
     };
     let assignment: { assignedTo: string; assignedEmail: string | null } | undefined;
     try {
+      recordPrinterUploadStage(res, "validating-assignment");
       assignment = await validatePrintAssignment(
         startPrint && this.settingsStore.getServerSettings().printAssignmentEnabled,
         inputAssignedTo,
@@ -216,6 +220,7 @@ export class PrinterFilesController {
       });
     let assignedJob: PrintJob | undefined;
     try {
+      recordPrinterUploadStage(res, "transferring-to-printer");
       if (assignment) {
         const uploadedPath = await upload();
         if (!uploadedPath) {
@@ -225,6 +230,7 @@ export class PrinterFilesController {
           });
         }
         const encodedPath = uploadedPath.split("/").map(encodeURIComponent).join("/");
+        recordPrinterUploadStage(res, "starting-print");
         assignedJob = await this.printJobService.startAssignedPrint(
           currentPrinterId,
           uploadedPath,
@@ -241,6 +247,7 @@ export class PrinterFilesController {
     }
 
     // Process file: analyze, store, create job
+    recordPrinterUploadStage(res, "processing-file");
     const ext = extname(uploadedFile.originalname);
     const tempPathWithExt = uploadedFile.path + ext;
 
@@ -371,6 +378,7 @@ export class PrinterFilesController {
       // Thumbnail will be automatically loaded from the analyzed print job
       // by the PrinterThumbnailCache when the job is analyzed
     } catch (error) {
+      recordPrinterUploadStage(res, "file-processing-failed");
       this.logger.error(`File processing failed: ${errorSummary(error)}`);
       captureException(error);
       if (assignedJob) {
@@ -386,6 +394,7 @@ export class PrinterFilesController {
       }
     }
 
+    recordPrinterUploadStage(res, "sending-response");
     res.send();
   }
 

@@ -271,3 +271,10 @@ Backup restoration loses later changes.
   are not trusted by default; use proxy access logs to trace callers behind a
   proxy rather than enabling unrestricted proxy trust. Treat IP addresses as
   sensitive when sharing logs.
+- **Printer upload stays pending:** set `PRINTER_UPLOAD_DIAGNOSTICS=true` in the
+  server checkout's `.env`, recreate the container, then filter the Compose logs
+  for `Printer upload diagnostics`. Group entries by request ID and look for the
+  last stage reached: request arrival, multipart parsing, printer transfer, file
+  processing, or response/disconnect. The diagnostic entries omit filenames,
+  credentials, and file contents. Remove the override and recreate the container
+  when finished.

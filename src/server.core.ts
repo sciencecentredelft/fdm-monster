@@ -11,6 +11,7 @@ import { initializePassportStrategies } from "./middleware/passport";
 import { ensureDirExists, getDatabaseFolder, getMediaPath } from "@/utils/fs.utils";
 import { Counter } from "prom-client";
 import { LoggerService } from "@/handlers/logger";
+import { printerUploadDiagnostics } from "@/middleware/printer-upload-diagnostics";
 
 const httpRequestsTotal = new Counter({
   name: "http_requests_total",
@@ -20,6 +21,9 @@ const httpRequestsTotal = new Counter({
 export async function setupServer() {
   const logger = new LoggerService("FDM-ServerCore");
   const httpServer = express();
+  if (process.env.PRINTER_UPLOAD_DIAGNOSTICS === "true") {
+    httpServer.use(printerUploadDiagnostics);
+  }
 
   const databasePath = getDatabaseFolder();
   ensureDirExists(databasePath);
