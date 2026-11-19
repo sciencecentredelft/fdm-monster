@@ -1,4 +1,5 @@
 import nock from "nock";
+import axios from "axios";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDefaultUserDirectoryConfig } from "@/constants/server-settings.constants";
 import type { UserDirectoryConfig } from "@/services/interfaces/user-directory.dto";
@@ -9,6 +10,7 @@ import { LoggerFactory } from "@/handlers/logger-factory";
 import { LoggerService } from "@/handlers/logger";
 
 const clientSecret = "test-client-secret";
+const lookupTimeoutEnvKey = "USER_DIRECTORY_LOOKUP_TIMEOUT_SECONDS";
 
 function createService(config: Partial<UserDirectoryConfig>, secret = clientSecret) {
   const resolvedConfig = { ...getDefaultUserDirectoryConfig(), ...config };
@@ -23,11 +25,48 @@ afterEach(() => {
   nock.cleanAll();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe(UserDirectoryService.name, () => {
   const cacheConfig = { enabled: true, endpoint: "https://directory.example/users" };
   const cachedPerson = { name: "Ada", email: "ada@example.com" };
+
+  it("uses the configured overall deadline across pages without changing the request timeout", async () => {
+    vi.stubEnv(lookupTimeoutEnvKey, "180");
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const request = vi
+      .spyOn(axios, "request")
+      .mockResolvedValueOnce({ data: { count: 2, page_number: 1, page_size: 1, users: [cachedPerson] } })
+      .mockImplementationOnce(async () => {
+        deadline.abort();
+        throw new axios.CanceledError();
+      });
+
+    await expect(
+      createService({ ...cacheConfig, paginationEnabled: true, pageSize: 1 }).testConnection(),
+    ).rejects.toThrow("Directory API lookup exceeded the 180-second time limit");
+    expect(timeout).toHaveBeenCalledExactlyOnceWith(180_000);
+    expect(request).toHaveBeenCalledTimes(2);
+    for (const [config] of request.mock.calls) {
+      expect(config).toMatchObject({ timeout: 10_000, signal: deadline.signal });
+    }
+  });
+
+  it.each([undefined, "29", "301", "30.5", "invalid"])(
+    "uses the 30-second budget when the override is unset or invalid (%s)",
+    async (value) => {
+      vi.stubEnv(lookupTimeoutEnvKey, value);
+      const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
+      const timeout = vi.spyOn(AbortSignal, "timeout");
+      nock("https://directory.example").get("/users").reply(200, { users: [] });
+      await expect(createService(cacheConfig).listUsers()).resolves.toEqual([]);
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      if (value === undefined) expect(warn).not.toHaveBeenCalled();
+      else expect(warn).toHaveBeenCalledWith(expect.stringContaining("using 30 seconds"));
+    },
+  );
 
   it("logs OAuth redirect diagnostics without credentials, URL paths, or response data", async () => {
     const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
@@ -80,7 +119,7 @@ describe(UserDirectoryService.name, () => {
     const warn = vi.spyOn(LoggerService.prototype, "warn").mockImplementation(() => {});
     nock("https://directory.example")
       .get("/users")
-      .query({ page_number: 1, page_size: 1 })
+      .query({ page_number: 1, page_size: 250 })
       .reply(200, { count: 2, page_number: 1, page_size: 1, results: [cachedPerson] })
       .get("/users")
       .query({ page_number: 2, page_size: 1 })
@@ -89,12 +128,20 @@ describe(UserDirectoryService.name, () => {
       createService({
         ...cacheConfig,
         paginationEnabled: true,
-        pageSize: 1,
+        pageSize: 250,
         usersPath: "results",
       }).listUsers(),
     ).rejects.toThrow("HTTP 403");
     expect(warn).toHaveBeenCalledWith("User directory request failed", {
-      meta: expect.objectContaining({ stage: "users", method: "GET", page: 2, status: 403 }),
+      meta: expect.objectContaining({
+        stage: "users",
+        method: "GET",
+        page: 2,
+        status: 403,
+        requestedPageSize: 250,
+        effectivePageSize: 1,
+        expectedPages: 2,
+      }),
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(cachedPerson.email);
     expect(JSON.stringify(warn.mock.calls)).not.toContain(cachedPerson.name);

@@ -239,8 +239,14 @@ Backup restoration loses later changes.
   also occur during a normal print transition; look for repeated disagreements.
   Set the flag back to `false` and recreate the service when done.
 - **Directory errors:** check logs, URL reachability, scopes and response paths.
-  Each lookup is limited to 30 seconds, 100 pages and 10,000 users; partial results
-  are not silently returned.
+  Each lookup is limited to 30 seconds by default, 100 pages and 10,000 users;
+  partial results are not returned. If authentication succeeds but pagination
+  hits the overall deadline, set `USER_DIRECTORY_LOOKUP_TIMEOUT_SECONDS=180`
+  in the server checkout's local `.env` and recreate the service. The override
+  accepts whole seconds from 30 to 300. Individual requests still have a
+  10-second timeout. After the first page, request failure logs include the
+  requested and effective page sizes and expected page count, so you can see
+  whether the API capped the page size.
   After deploying the logging changes, run
   `docker compose -f docker-compose.fork.yml logs --since=5m -f fdm-monster`,
   then use **Save**, followed by **Test connection** in the directory settings.

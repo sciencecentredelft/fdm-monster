@@ -6,6 +6,8 @@ import type { ILoggerFactory } from "@/handlers/logger-factory";
 import type { LoggerService } from "@/handlers/logger";
 
 const requestTimeoutMs = 10_000;
+const defaultLookupTimeoutSeconds = 30;
+const lookupTimeoutEnvKey = "USER_DIRECTORY_LOOKUP_TIMEOUT_SECONDS";
 const maxResponseBytes = 1_048_576;
 const maxPages = 100;
 const maxUsers = 10_000;
@@ -18,6 +20,9 @@ type RequestContext = {
   credentialPlacement: string;
   scopeConfigured: boolean;
   page?: number;
+  requestedPageSize?: number;
+  effectivePageSize?: number;
+  expectedPages?: number;
 };
 
 export class UserDirectoryService {
@@ -25,12 +30,21 @@ export class UserDirectoryService {
   private pendingUsers?: Promise<UserDirectoryPerson[]>;
   private cacheRevision = 0;
   private readonly logger: LoggerService;
+  private readonly lookupTimeoutSeconds: number;
 
   constructor(
     private readonly settingsStore: SettingsStore,
     loggerFactory: ILoggerFactory,
   ) {
     this.logger = loggerFactory(UserDirectoryService.name);
+    const rawTimeout = process.env[lookupTimeoutEnvKey]?.trim();
+    const timeout = rawTimeout ? Number(rawTimeout) : defaultLookupTimeoutSeconds;
+    if (Number.isInteger(timeout) && timeout >= defaultLookupTimeoutSeconds && timeout <= 300) {
+      this.lookupTimeoutSeconds = timeout;
+    } else {
+      this.lookupTimeoutSeconds = defaultLookupTimeoutSeconds;
+      this.logger.warn(`${lookupTimeoutEnvKey} must be a whole number between 30 and 300; using 30 seconds`);
+    }
   }
 
   async validateAssignment(name: string, email?: string | null): Promise<void> {
@@ -82,7 +96,7 @@ export class UserDirectoryService {
   }
 
   private async fetchUsers(config: UserDirectoryConfig): Promise<UserDirectoryPerson[]> {
-    const signal = AbortSignal.timeout(30_000);
+    const signal = AbortSignal.timeout(this.lookupTimeoutSeconds * 1000);
     const credentials = await this.getCredentials(config, signal);
     const users: UserDirectoryPerson[] = [];
     let total: number | undefined;
@@ -100,6 +114,11 @@ export class UserDirectoryService {
         credentialPlacement: config.authMode === "credentials" ? config.credentialPlacement : "none",
         scopeConfigured: !!config.scope,
         page,
+        ...(config.paginationEnabled && {
+          requestedPageSize: config.pageSize,
+          effectivePageSize: total === undefined ? undefined : pageSize,
+          expectedPages: total === undefined ? undefined : Math.ceil(total / pageSize),
+        }),
       });
       const entries = this.getPath(response.data, config.usersPath);
       if (!Array.isArray(entries)) {
@@ -312,6 +331,7 @@ export class UserDirectoryService {
           origin: new URL(url).origin,
           status,
           elapsedMs: Date.now() - startedAt,
+          lookupTimeoutSeconds: this.lookupTimeoutSeconds,
           failure: signal.aborted
             ? "lookup-timeout"
             : status
@@ -327,7 +347,7 @@ export class UserDirectoryService {
       });
       throw new BadRequestException(
         signal.aborted
-          ? "Directory API lookup exceeded the 30-second time limit"
+          ? `Directory API lookup exceeded the ${this.lookupTimeoutSeconds}-second time limit`
           : status
             ? `Directory API request failed with HTTP ${status}`
             : "Could not reach the directory API",
