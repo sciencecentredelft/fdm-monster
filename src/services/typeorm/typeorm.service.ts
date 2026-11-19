@@ -1,6 +1,7 @@
 import { DataSource } from "typeorm";
 import { LoggerService } from "@/handlers/logger";
 import { AppDataSource } from "@/data-source";
+import { SqliteQueryDiagnostics } from "@/handlers/sqlite-query-diagnostics";
 
 export class TypeormService {
   loaded = false;
@@ -30,6 +31,9 @@ export class TypeormService {
     } else {
       const connection = await dataSource.initialize();
       const migrations = await connection.runMigrations({ transaction: "all" });
+      if (process.env.FDM_SQLITE_QUERY_DIAGNOSTICS === "true" && process.platform === "linux") {
+        connection.subscribers.push(new SqliteQueryDiagnostics());
+      }
       this.logger.log(`Typeorm connection initialized - ${migrations.length} migrations executed`);
     }
     this.loaded = true;

@@ -16,6 +16,7 @@ import { PrintJobService } from "@/services/orm/print-job.service";
 import { PrinterCache } from "@/state/printer.cache";
 import { PrinterThumbnailCache } from "@/state/printer-thumbnail.cache";
 import type { CurrentMessageDto } from "@/services/octoprint/dto/websocket/current-message.dto";
+import { countOctoPrintCurrent, withOctoPrintQueryContext } from "@/handlers/sqlite-query-diagnostics";
 
 export type WsMessageWithoutEventAndPlugin = Exclude<WsMessage, "event" | "plugin">;
 export type PrinterEventsCacheDto = Record<WsMessageWithoutEventAndPlugin, any>;
@@ -124,6 +125,7 @@ export class PrinterEventsCache extends KeyDiffCache<PrinterEventsCacheDto> {
   private async onOctoPrintSocketMessage(e: OctoPrintEventDto) {
     const printerId = e.printerId;
     if (e.event === messages.current && e.payload) {
+      countOctoPrintCurrent();
       const payload = e.payload as CurrentMessageDto;
 
       const keysToUpdate = ["state", "job", "progress", "currentZ", "offsets", "resends"];
@@ -140,15 +142,19 @@ export class PrinterEventsCache extends KeyDiffCache<PrinterEventsCacheDto> {
 
       if (flags?.printing && filePath) {
         const printerName = await this.getPrinterName(printerId);
-        const job = await this.printJobService.markStarted(printerId, filePath, printerName);
+        const job = await withOctoPrintQueryContext("start", () =>
+          this.printJobService.markStarted(printerId, filePath, printerName),
+        );
 
         if (job) {
-          await this.printerThumbnailCache.handleJobStarted(printerId, job.id);
+          await withOctoPrintQueryContext("thumbnail", () =>
+            this.printerThumbnailCache.handleJobStarted(printerId, job.id),
+          );
         }
 
         if (job && !job.fileStorageId && job.analysisState === "NOT_ANALYZED") {
           this.logger.log(`Job ${job.id} has no local file - triggering download and analysis`);
-          await this.printJobService.triggerFileAnalysis(job.id);
+          await withOctoPrintQueryContext("analysis", () => this.printJobService.triggerFileAnalysis(job.id));
         }
 
         // Update metadata from OctoPrint job data if available (as fallback)
@@ -156,31 +162,41 @@ export class PrinterEventsCache extends KeyDiffCache<PrinterEventsCacheDto> {
           const estimatedTime = payload?.job?.estimatedPrintTime;
           const filament = payload?.job?.filament?.tool0;
 
-          await this.printJobService.updateJobMetadata(printerId, filePath, {
-            gcodePrintTimeSeconds: estimatedTime ? Math.round(estimatedTime) : null,
-            nozzleDiameterMm: null,
-            filamentDiameterMm: null,
-            filamentDensityGramsCm3: null,
-            filamentUsedMm: filament?.length ? Math.round(filament.length) : null,
-            filamentUsedCm3: filament?.volume ? Math.round(filament.volume * 100) / 100 : null,
-            filamentUsedGrams: null,
-            totalFilamentUsedGrams: null,
-          });
+          await withOctoPrintQueryContext("metadata", () =>
+            this.printJobService.updateJobMetadata(printerId, filePath, {
+              gcodePrintTimeSeconds: estimatedTime ? Math.round(estimatedTime) : null,
+              nozzleDiameterMm: null,
+              filamentDiameterMm: null,
+              filamentDensityGramsCm3: null,
+              filamentUsedMm: filament?.length ? Math.round(filament.length) : null,
+              filamentUsedCm3: filament?.volume ? Math.round(filament.volume * 100) / 100 : null,
+              filamentUsedGrams: null,
+              totalFilamentUsedGrams: null,
+            }),
+          );
         }
       }
       if (typeof completion === "number" && filePath) {
-        await this.printJobService.markProgress(printerId, filePath, completion);
+        await withOctoPrintQueryContext("progress", () =>
+          this.printJobService.markProgress(printerId, filePath, completion),
+        );
       }
       if ((flags?.finishing || flags?.error || flags?.cancelling) && filePath) {
         if (flags?.finishing) {
-          const job = await this.printJobService.markFinished(printerId, filePath);
+          const job = await withOctoPrintQueryContext("finish", () =>
+            this.printJobService.markFinished(printerId, filePath),
+          );
           if (job) {
-            await this.printerThumbnailCache.handleJobCompleted(printerId, job.id);
+            await withOctoPrintQueryContext("thumbnail", () =>
+              this.printerThumbnailCache.handleJobCompleted(printerId, job.id),
+            );
           }
         } else if (flags?.cancelling) {
-          await this.printJobService.markFailed(printerId, filePath, "Cancelled");
+          await withOctoPrintQueryContext("fail", () =>
+            this.printJobService.markFailed(printerId, filePath, "Cancelled"),
+          );
         } else {
-          await this.printJobService.markFailed(printerId, filePath, "Error");
+          await withOctoPrintQueryContext("fail", () => this.printJobService.markFailed(printerId, filePath, "Error"));
         }
       }
     }

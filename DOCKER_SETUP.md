@@ -301,3 +301,14 @@ Backup restoration loses later changes.
   before recreating the container. Inspect it locally; profiles can contain
   function names and source paths. Remove `FDM_CPU_PROFILE` at the next planned
   recreation.
+- **Identify expensive SQLite queries:** Set `FDM_SQLITE_QUERY_DIAGNOSTICS=true`
+  in `.env`, rebuild/recreate the service, and wait for `SQLite query diagnostics
+  armed`. Run `docker compose -f docker-compose.fork.yml kill -s SIGUSR2 fdm-monster`
+  once while the problem is present. After 20 seconds, search the logs for
+  `SQLite query diagnostics`. The capture reports the number of OctoPrint
+  `current` events and up to 20 groups of completed queries ranked by total
+  TypeORM execution time, with call counts, maximum time, query fingerprints,
+  and OctoPrint operation labels where known. It does not log query text,
+  parameter values, or returned rows. Disable `FDM_CPU_PROFILE` for a query-only
+  capture; if both flags are enabled, the signal starts both captures. Remove
+  `FDM_SQLITE_QUERY_DIAGNOSTICS` at the next planned recreation.
