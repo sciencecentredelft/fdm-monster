@@ -291,3 +291,13 @@ Backup restoration loses later changes.
   on the media volume and may require a cross-filesystem copy. Shared-storage
   uploads and all timeouts are unchanged. Remove the setting and recreate the
   service to return printer uploads to the media volume.
+- **Capture sustained backend CPU usage:** Set `FDM_CPU_PROFILE=true` in `.env`
+  and rebuild/recreate the service during a maintenance window. Wait for
+  `CPU profile armed` in the logs before running
+  `docker compose -f docker-compose.fork.yml kill -s SIGUSR2 fdm-monster`.
+  This signal starts one 20-second profile per container start without stopping
+  the server or opening a debugger port. Copy the file from the `CPU profile saved`
+  path with `docker compose -f docker-compose.fork.yml cp fdm-monster:/path/from/log ./fdm-monster.cpuprofile`
+  before recreating the container. Inspect it locally; profiles can contain
+  function names and source paths. Remove `FDM_CPU_PROFILE` at the next planned
+  recreation.
