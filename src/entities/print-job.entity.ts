@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -155,6 +156,7 @@ export interface PrintStatistics {
 }
 
 @Entity()
+@Index("IDX_print_job_printer_status_started_at", ["printerId", "status", "startedAt"])
 export class PrintJob {
   @PrimaryGeneratedColumn()
   id: number;

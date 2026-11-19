@@ -144,6 +144,10 @@ docker compose -f docker-compose.fork.yml logs --tail=100 fdm-monster
 ```
 
 Stop on any failed pull/build; do not start a partially updated deployment.
+
+The active print-job lookup index is created automatically at startup. Keep the
+pre-upgrade database backup and allow time for SQLite to build the index before
+testing uploads, especially when the farm has a large print history.
 Use `build --pull` when deliberately refreshing the Node base image, then retest.
 Check migration logs, hard-refresh browsers, verify login, printer status and
 directory selection, and record the new revisions. The image embeds both forks;
