@@ -275,6 +275,9 @@ Backup restoration loses later changes.
   server checkout's `.env`, recreate the container, then filter the Compose logs
   for `Printer upload diagnostics`. Group entries by request ID and look for the
   last stage reached: request arrival, multipart parsing, printer transfer, file
-  processing, or response/disconnect. The diagnostic entries omit filenames,
-  credentials, and file contents. Remove the override and recreate the container
-  when finished.
+  processing, or response/disconnect. During multipart parsing, `request-body-ended`
+  means Node finished reading the HTTP body. `temporary-file-write-finished`
+  reports a completed temporary file write and its byte count. On disconnect,
+  `RequestComplete: false` means Node did not receive the complete HTTP message.
+  The diagnostic entries omit filenames, credentials, and file contents. Remove
+  the override and recreate the container when finished.

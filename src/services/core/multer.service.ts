@@ -9,6 +9,7 @@ import { errorSummary } from "@/utils/error.utils";
 import { LoggerService } from "@/handlers/logger";
 import type { ILoggerFactory } from "@/handlers/logger-factory";
 import { ValidationException } from "@/exceptions/runtime.exceptions";
+import { observePrinterUploadStorage } from "@/middleware/printer-upload-diagnostics";
 
 export class MulterService {
   private readonly logger: LoggerService;
@@ -55,7 +56,7 @@ export class MulterService {
 
   async multerLoadFileAsync(req: Request, res: Response, fileExtensions: string[], storeAsFile = true) {
     const files = await new Promise<Express.Multer.File[]>((resolve, reject) =>
-      this.getMulterFileFilter(storeAsFile)(req, res, (err) => {
+      this.getMulterFileFilter(storeAsFile, res)(req, res, (err) => {
         if (err) return reject(err);
         resolve(req.files as Express.Multer.File[]);
       }),
@@ -96,12 +97,13 @@ export class MulterService {
     }
   }
 
-  getMulterFileFilter(storeAsFile = true) {
+  getMulterFileFilter(storeAsFile = true, res?: Response) {
     return multer({
       storage: storeAsFile
-        ? diskStorage({
-            destination: join(getMediaPath(), AppConstants.defaultFileUploadsStorage),
-          })
+        ? observePrinterUploadStorage(
+            diskStorage({ destination: join(getMediaPath(), AppConstants.defaultFileUploadsStorage) }),
+            res,
+          )
         : memoryStorage(),
     }).any();
   }
