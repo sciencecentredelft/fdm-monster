@@ -7,7 +7,7 @@ import { FileAnalysisService } from "@/services/file-analysis.service";
 import { PrinterApiFactory } from "@/services/printer-api.factory";
 import { PrinterCache } from "@/state/printer.cache";
 import { captureException } from "@sentry/node";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -199,7 +199,7 @@ export class PrintFileDownloaderService {
         );
       } finally {
         try {
-          unlinkSync(tempPath);
+          rmSync(tempPath, { force: true });
         } catch (cleanupError) {
           this.logger.warn(`Failed to clean up temp file ${tempPath}: ${cleanupError}`);
         }

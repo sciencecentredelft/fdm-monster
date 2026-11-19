@@ -8,7 +8,7 @@ import EventEmitter2 from "eventemitter2";
 import { LoggerService } from "@/handlers/logger";
 import { ConfigService } from "@/services/core/config.service";
 import type { ILoggerFactory } from "@/handlers/logger-factory";
-import { AxiosError } from "axios";
+import { AxiosError, isAxiosError } from "axios";
 import type { ISocketLogin } from "@/shared/dtos/socket-login.dto";
 import { WebsocketAdapter } from "@/shared/websocket.adapter";
 import type { OctoPrintEventDto } from "@/services/octoprint/dto/octoprint-event.dto";
@@ -22,6 +22,7 @@ import type { OctoprintErrorDto } from "@/services/octoprint/dto/rest/error.dto"
 import { OctoprintType } from "@/services/printer-api.interface";
 import type { IWebsocketAdapter } from "@/services/websocket-adapter.interface";
 import type { CurrentJobDto } from "@/services/octoprint/dto/job/current-job.dto";
+import { OctoprintCommunicationDiagnostics } from "@/services/octoprint/octoprint-communication-diagnostics";
 
 export const WsMessage = {
   // Custom events
@@ -64,6 +65,10 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
   private sessionDto?: OP_LoginDto;
   private username?: string;
   private refreshPrinterCurrentInterval?: NodeJS.Timeout;
+  private currentPollInFlight = false;
+  private pollingSession = 0;
+  private websocketCurrentRevision = 0;
+  private readonly diagnostics?: OctoprintCommunicationDiagnostics;
 
   constructor(
     loggerFactory: ILoggerFactory,
@@ -74,6 +79,9 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
     super(loggerFactory);
 
     this.logger = loggerFactory(OctoprintWebsocketAdapter.name);
+    if (this.configService.get("OCTOPRINT_COMMUNICATION_DIAGNOSTICS", "false") === "true") {
+      this.diagnostics = new OctoprintCommunicationDiagnostics(this.logger, () => this.printerId);
+    }
   }
 
   get _debugMode() {
@@ -120,7 +128,7 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
   }
 
   close() {
-    clearInterval(this.refreshPrinterCurrentInterval);
+    this.stopPolling();
     super.close();
   }
 
@@ -140,6 +148,7 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
    */
   async setupSocketSession(): Promise<void> {
     this.resetSocketState();
+    const pollingSession = this.pollingSession;
     this.sessionDto = await this.octoprintClient
       .login(this.login)
       .then((d) => {
@@ -203,16 +212,21 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
       throw e;
     });
 
+    if (pollingSession !== this.pollingSession) return;
     await this.updateCurrentStateSafely();
+    if (pollingSession !== this.pollingSession) return;
 
     this.logger.log(`Setting up printer current interval loop with 10 seconds interval`);
-    if (this.refreshPrinterCurrentInterval) {
-      clearInterval(this.refreshPrinterCurrentInterval);
-    }
-    this.refreshPrinterCurrentInterval = setInterval(async () => {
-      await this.updateCurrentStateSafely();
-      // This timeout should be greater than or equal to the API timeout
+    this.refreshPrinterCurrentInterval = setInterval(() => {
+      void this.updateCurrentStateSafely();
     }, 10000);
+  }
+
+  private stopPolling() {
+    clearInterval(this.refreshPrinterCurrentInterval);
+    this.refreshPrinterCurrentInterval = undefined;
+    this.pollingSession++;
+    this.diagnostics?.resetReports();
   }
 
   setReauthRequired() {
@@ -226,6 +240,7 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
   }
 
   resetSocketState() {
+    this.stopPolling();
     this.setSocketState("unopened");
     this.setApiState("unset");
   }
@@ -260,8 +275,13 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
     const eventName = Object.keys(data)[0];
     const payload = data[eventName];
 
-    if (this._debugMode) {
-      this.logger.log(`RX Msg ${eventName} ${message.substring(0, 140)}...`);
+    if (eventName === OctoPrintMessage.current) {
+      this.websocketCurrentRevision++;
+      this.diagnostics?.observe("websocket", payload);
+    }
+
+    if (this._debugMode && !this.diagnostics) {
+      this.logger.log(`Printer (${this.printerId}) WebSocket RX Msg ${eventName} ${message.substring(0, 140)}...`);
     }
 
     if (eventName === OctoPrintMessage.reauthRequired) {
@@ -288,23 +308,78 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
    * @private
    */
   private async updateCurrentStateSafely() {
+    if (this.currentPollInFlight) {
+      this.diagnostics?.record("poll-skipped", "http", { reason: "poll-in-flight" });
+      return;
+    }
+    this.currentPollInFlight = true;
+    const session = this.pollingSession;
+    const revision = this.websocketCurrentRevision;
+    const startedAt = performance.now();
+    let stage = "printer";
+    const shouldDiscard = (report?: Partial<CurrentMessageDto>) => {
+      const sessionChanged = session !== this.pollingSession;
+      if (!sessionChanged && revision === this.websocketCurrentRevision) return false;
+      this.diagnostics?.record("poll-discarded", "http", {
+        stage,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        reason: sessionChanged ? "session-changed" : "newer-websocket-current",
+      });
+      if (!sessionChanged && report) this.diagnostics?.observe("http", report, true);
+      if (this._debugMode) {
+        this.logger.log(`Printer (${this.printerId}) discarded superseded HTTP poll`);
+      }
+      return true;
+    };
+
     try {
       const current = await this.octoprintClient.getPrinterCurrent(this.login, true);
+      if (shouldDiscard({ state: current.data?.state })) return;
       const isOperational = current.data?.state?.flags?.operational;
 
       let job = {} as CurrentJobDto;
       if (isOperational) {
+        stage = "job";
         const jobResponse = await this.octoprintClient.getJob(this.login);
         job = jobResponse.data;
       }
 
+      const report = { ...current.data, progress: job?.progress, job: job?.job };
+      if (shouldDiscard(report)) return;
+      const requestElapsedMs = Math.round(performance.now() - startedAt);
+      this.diagnostics?.observe("http", report);
       this.setApiState(API_STATE.responding);
-      return await this.emitEvent("current", { ...current.data, progress: job?.progress, job: job?.job });
+      const requestStage = stage;
+      stage = "publish";
+      await this.emitEvent("current", report);
+      this.diagnostics?.record("poll-success", "http", {
+        stage: requestStage,
+        elapsedMs: requestElapsedMs,
+        socketState: this.socketState,
+        websocketAgeMs:
+          this.lastMessageReceivedTimestamp === null ? undefined : Date.now() - this.lastMessageReceivedTimestamp,
+      });
     } catch (e) {
-      if ((e as AxiosError).isAxiosError) {
+      const discarded = shouldDiscard();
+      const error = isAxiosError(e) ? e : undefined;
+      this.diagnostics?.record("poll-failed", "http", {
+        stage,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        status: error?.response?.status,
+        failure: error?.response
+          ? "http-response"
+          : error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT"
+            ? "timeout"
+            : error
+              ? "transport"
+              : "unexpected",
+        discarded,
+      });
+      if (discarded) return;
+      if ((e as AxiosError)?.isAxiosError) {
         const castError = e as OctoprintErrorDto;
         if (castError?.response?.status == 409) {
-          this.logger.error(`Printer current interval loop error`);
+          this.logger.error(`Printer (${this.printerId}) HTTP current poll returned 409`);
           await this.emitEvent("current", {
             state: {
               flags: {
@@ -317,12 +392,14 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
           } as CurrentMessageDto);
           return;
         }
-        this.logger.error(`Could not update Octoprint current due to a request error`);
+        this.logger.error(`Printer (${this.printerId}) HTTP current poll failed`);
         this.setApiState(API_STATE.noResponse);
         return;
       }
-      this.logger.error(`Could not update Octoprint current due to an unknown error`);
+      this.logger.error(`Printer (${this.printerId}) HTTP current poll failed with an unexpected error`);
       this.setApiState(API_STATE.noResponse);
+    } finally {
+      this.currentPollInFlight = false;
     }
   }
 
@@ -353,6 +430,9 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
   }
 
   private setSocketState(state: SocketState) {
+    if (this.socketState !== state) {
+      this.diagnostics?.record("socket-state", "websocket", { from: this.socketState, to: state });
+    }
     this.socketState = state;
     this.stateUpdated = true;
     this.stateUpdateTimestamp = Date.now();
@@ -363,6 +443,9 @@ export class OctoprintWebsocketAdapter extends WebsocketAdapter implements IWebs
   }
 
   private setApiState(state: ApiState) {
+    if (this.apiState !== state) {
+      this.diagnostics?.record("api-state", "http", { from: this.apiState, to: state });
+    }
     if (state === API_STATE.globalKey) {
       this.logger.warn("Global API Key WS State detected");
     }

@@ -39,27 +39,12 @@ The application runs as the container's non-root `node` user.
 
 ## Network access
 
-By default port 4000 is exposed only on the host loopback address. For trusted LAN
-access, set the host bind address before `up -d`:
-
-PowerShell:
-
-```powershell
-$env:FDM_BIND_ADDRESS = "0.0.0.0"
-docker compose -f docker-compose.fork.yml up -d
-```
-
-Bash:
-
-```sh
-FDM_BIND_ADDRESS=0.0.0.0 docker compose -f docker-compose.fork.yml up -d
-```
-
-You can instead bind a specific host LAN IP. Set `FDM_PORT` to change the host
-port if 4000 is occupied. Preserve these values in your deployment environment
-for future updates. A local ignored `.env` in the server checkout may contain
-`FDM_BIND_ADDRESS=...` and `FDM_PORT=...`; it is for Compose substitution and is
-not copied into this image.
+By default Docker publishes port 4000 on all IPv4 interfaces (`0.0.0.0`).
+Set `FDM_BIND_ADDRESS=127.0.0.1` for host-only access, or set it to a specific
+host LAN IP to bind only that interface. Set `FDM_PORT` to change the host port
+if 4000 is occupied. You can save either override in the server checkout's
+local ignored `.env` file; it is used by Compose and is not copied into the image.
+If an existing override specifies `127.0.0.1`, remove it to use the new default.
 
 Browse to `http://<Docker-host-LAN-IP>:4000` from other computers. Restrict firewall
 access to the trusted subnet. Do not forward the port to the public internet.
@@ -227,10 +212,32 @@ Backup restoration loses later changes.
 - **Permission denied on volumes:** the image uses UID 1000. Existing imported
   volumes/bind mounts must be writable by that user. Do not make all files
   world-writable; repair only the known farm volume ownership.
+- **`EXDEV` saving print files:** `/tmp` and the media volume can be on different
+  filesystems. The backend now copies via the destination volume when a direct
+  move cannot cross filesystems. Rebuild and recreate the container to deploy
+  the fix; no change to the volume mounts is needed.
 - **404 for user-directory routes:** deploy matching server/client revisions and
   recreate the container; refreshing the browser cannot update backend code.
 - **UI changes missing:** hard-refresh and inspect startup/client-copy errors.
   Do not replace the fork bundle through upstream update controls.
+- **OctoPrint state or filename keeps switching:** compare FDM Monster with
+  the native OctoPrint UI for the same printer and port before sending print
+  commands. FDM Monster runs at most one HTTP status poll per printer adapter
+  at a time and discards results superseded by a WebSocket status update.
+  HTTP poll errors include the FDM Monster printer ID.
+- **Unattended OctoPrint diagnostics:** set `OCTOPRINT_COMMUNICATION_DIAGNOSTICS=true`
+  in the server checkout's local `.env`, then recreate the service with
+  `docker compose -f docker-compose.fork.yml up -d` (build the updated image
+  first). Search Compose logs for `OctoPrint diagnostics:`. Entries identify
+  the printer and source (`http` or `websocket`) and show connection transitions,
+  poll timing, failures, skipped or discarded polls, and differences between
+  recent status reports. `Discarded: true` means the HTTP report was not
+  applied. Job identifiers are filename fingerprints, not raw filenames.
+  Reports are sampled per event type and printer: up to once every five seconds
+  for connection transitions and once a minute for other events. `Suppressed`
+  counts repeats since the previous entry of that type. A report difference can
+  also occur during a normal print transition; look for repeated disagreements.
+  Set the flag back to `false` and recreate the service when done.
 - **Directory errors:** check logs, URL reachability, scopes and response paths.
   Each lookup is limited to 30 seconds, 100 pages and 10,000 users; partial results
   are not silently returned.

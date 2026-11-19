@@ -5,11 +5,25 @@ import { TypeormService } from "@/services/typeorm/typeorm.service";
 import { AppConstants } from "@/server.constants";
 import { getMediaPath } from "@/utils/fs.utils";
 import path, { basename, extname, join } from "node:path";
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile, access } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  copyFile,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+  access,
+} from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { existsSync, createReadStream, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { ConflictException } from "@/exceptions/runtime.exceptions";
+
+const stagingPrefix = ".staging-";
 
 export interface IFileStorageService {
   saveFile(file: Express.Multer.File, fileHash?: string): Promise<string>;
@@ -124,7 +138,7 @@ export class FileStorageService implements IFileStorageService {
     const targetPath = join(targetDir, `${fileId}${fileExt}`);
 
     if (file.path) {
-      await rename(file.path, targetPath);
+      await this.moveUploadedFile(file.path, targetPath, targetDir);
     } else if (file.buffer) {
       await writeFile(targetPath, file.buffer);
     } else {
@@ -133,6 +147,31 @@ export class FileStorageService implements IFileStorageService {
 
     this.logger.log(`Saved file ${file.originalname} as ${fileId}`);
     return fileId;
+  }
+
+  private async moveUploadedFile(source: string, target: string, targetDir: string): Promise<void> {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EXDEV") throw error;
+    }
+
+    // Stage on the destination filesystem so readers never see a partially copied file.
+    const stagingDir = await mkdtemp(join(targetDir, stagingPrefix));
+    const stagedFile = join(stagingDir, "upload");
+    try {
+      await copyFile(source, stagedFile);
+      await rename(stagedFile, target);
+    } finally {
+      await rm(stagingDir, { recursive: true, force: true }).catch((error: unknown) => {
+        this.logger.warn("Could not clean up print file staging directory", error);
+      });
+    }
+
+    await rm(source, { force: true }).catch((error: unknown) => {
+      this.logger.warn("Could not remove temporary source after storing print file", error);
+    });
   }
 
   async getFile(fileStorageId: string): Promise<Buffer> {
@@ -233,7 +272,7 @@ export class FileStorageService implements IFileStorageService {
         const dirFiles = await readdir(dirPath);
 
         for (const file of dirFiles) {
-          if (file.endsWith("_thumbnails") || file.endsWith(".json")) continue;
+          if (file.startsWith(stagingPrefix) || file.endsWith("_thumbnails") || file.endsWith(".json")) continue;
 
           const fileId = path.parse(file).name;
           const metadata = await this.loadMetadata(fileId);
@@ -445,7 +484,7 @@ export class FileStorageService implements IFileStorageService {
         const dirFiles = await readdir(dirPath);
 
         for (const file of dirFiles) {
-          if (file.endsWith("_thumbnails") || file.endsWith(".json")) continue;
+          if (file.startsWith(stagingPrefix) || file.endsWith("_thumbnails") || file.endsWith(".json")) continue;
 
           const fileId = path.parse(file).name;
           const filePath = join(dirPath, file);
