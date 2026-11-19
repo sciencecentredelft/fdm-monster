@@ -25,8 +25,10 @@ import { getScopedPrinter } from "@/middleware/printer-resolver";
 import { FileAnalysisService } from "@/services/file-analysis.service";
 import { FileStorageService } from "@/services/file-storage.service";
 import { copyFileSync, createReadStream, existsSync, unlinkSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { PrintJobService } from "@/services/orm/print-job.service";
-import { extname } from "node:path";
+import { extname, join } from "node:path";
 import { SettingsStore } from "@/state/settings.store";
 import { validatePrintAssignment } from "./validation/print-assignment.validation";
 import type { PrintJob } from "@/entities/print-job.entity";
@@ -160,11 +162,30 @@ export class PrinterFilesController {
   @route("/:id/upload")
   @before(permission(PERMS.PrinterFiles.Upload))
   async uploadPrinterFile(req: Request, res: Response) {
+    const stagingDirectory =
+      process.env.PRINTER_UPLOAD_STAGE_IN_TMP === "true"
+        ? await mkdtemp(join(tmpdir(), "fdm-monster-printer-upload-"))
+        : undefined;
+    try {
+      await this.processPrinterUpload(req, res, stagingDirectory);
+    } finally {
+      if (stagingDirectory) {
+        await rm(stagingDirectory, { recursive: true, force: true }).catch((error: unknown) => {
+          this.logger.warn(`Could not clean up printer upload staging directory: ${errorSummary(error)}`);
+        });
+      }
+    }
+
+    recordPrinterUploadStage(res, "sending-response");
+    res.send();
+  }
+
+  private async processPrinterUpload(req: Request, res: Response, stagingDirectory?: string) {
     const { currentPrinterId, currentPrinter } = getScopedPrinter(req);
 
     const acceptedExtensions = this.getAcceptedFileExtensions(currentPrinter.printerType);
     recordPrinterUploadStage(res, "reading-multipart");
-    const files = await this.multerService.multerLoadFileAsync(req, res, acceptedExtensions, true);
+    const files = await this.multerService.multerLoadFileAsync(req, res, acceptedExtensions, true, stagingDirectory);
     recordPrinterUploadStage(res, "validating-upload");
 
     // FormData has key-values with type string only
@@ -393,9 +414,6 @@ export class PrinterFilesController {
         this.logger.error(`Could not remove uploaded file from temporary storage ${errorSummary(e)}`);
       }
     }
-
-    recordPrinterUploadStage(res, "sending-response");
-    res.send();
   }
 
   private getAcceptedFileExtensions(printerType: number): string[] {

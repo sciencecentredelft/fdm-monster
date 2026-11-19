@@ -15,6 +15,13 @@ import { BambuFtpAdapterStub } from "./stubs/bambu-ftp.adapter.stub";
 import { BambuMqttAdapterStub } from "./stubs/bambu-mqtt.adapter.stub";
 import { SettingsStore } from "@/state/settings.store";
 import { PrintJobService } from "@/services/orm/print-job.service";
+import { FileStorageService } from "@/services/file-storage.service";
+import { MulterService } from "@/services/core/multer.service";
+import { getMediaPath } from "@/utils/fs.utils";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { vi } from "vitest";
 
 const defaultRoute = AppConstants.apiRoute + "/printer-files";
 const thumbnailsRoute = `${defaultRoute}/thumbnails`;
@@ -57,6 +64,55 @@ beforeEach(async () => {
 describe(PrinterFilesController.name, () => {
   const gcodePath = "test/api/test-data/sample.gcode";
   const examplBambuFilePath = "test/api/test-data/sample.3mf";
+
+  describe("printer upload staging", () => {
+    let tempRoot: string;
+
+    beforeEach(async () => {
+      tempRoot = await mkdtemp(join(tmpdir(), "printer-upload-staging-test-"));
+      vi.stubEnv("TMPDIR", tempRoot);
+    });
+
+    afterEach(async () => {
+      vi.unstubAllEnvs();
+      await rm(tempRoot, { recursive: true, force: true });
+    });
+
+    it.each(["false", "true"])("stores the upload and cleans up with temp staging set to %s", async (enabled) => {
+      vi.stubEnv("PRINTER_UPLOAD_STAGE_IN_TMP", enabled);
+      const printer = await createTestPrinter(request);
+      const upload = nock(printer.printerURL).post("/api/files/local").reply(200);
+      const tracker = vi.spyOn(MulterService.prototype, "startTrackingSession");
+      try {
+        expectOkResponse(
+          await request.post(uploadFileRoute(printer.id)).field("startPrint", "false").attach("file", gcodePath),
+        );
+        expect(upload.isDone()).toBe(true);
+        const [file] = tracker.mock.calls[0];
+        const directory = dirname(file.path);
+        if (enabled === "true") expect(dirname(directory)).toBe(tempRoot);
+        else expect(directory).toBe(join(getMediaPath(), AppConstants.defaultFileUploadsStorage));
+        expect(await readdir(tempRoot)).toEqual([]);
+        const [job] = await container.resolve<PrintJobService>(DITokens.printJobService).getPrintJobHistory(printer.id);
+        expect(job?.fileStorageId).toBeTruthy();
+        const stored = await container
+          .resolve<FileStorageService>(DITokens.fileStorageService)
+          .getFile(job.fileStorageId!);
+        expect(stored.length).toBe(file.size);
+      } finally {
+        tracker.mockRestore();
+      }
+    });
+
+    it("cleans per-request staging after form validation fails", async () => {
+      vi.stubEnv("PRINTER_UPLOAD_STAGE_IN_TMP", "true");
+      const printer = await createTestPrinter(request);
+      expectInvalidResponse(
+        await request.post(uploadFileRoute(printer.id)).field("startPrint", "invalid").attach("file", gcodePath),
+      );
+      expect(await readdir(tempRoot)).toEqual([]);
+    });
+  });
 
   describe("last print starts", () => {
     afterEach(async () => {

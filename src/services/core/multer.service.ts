@@ -54,9 +54,15 @@ export class MulterService {
     return this.getMulterFileFilter(storeAsFile);
   }
 
-  async multerLoadFileAsync(req: Request, res: Response, fileExtensions: string[], storeAsFile = true) {
+  async multerLoadFileAsync(
+    req: Request,
+    res: Response,
+    fileExtensions: string[],
+    storeAsFile = true,
+    stagingDirectory?: string,
+  ) {
     const files = await new Promise<Express.Multer.File[]>((resolve, reject) =>
-      this.getMulterFileFilter(storeAsFile, res)(req, res, (err) => {
+      this.getMulterFileFilter(storeAsFile, res, stagingDirectory)(req, res, (err) => {
         if (err) return reject(err);
         resolve(req.files as Express.Multer.File[]);
       }),
@@ -97,11 +103,13 @@ export class MulterService {
     }
   }
 
-  getMulterFileFilter(storeAsFile = true, res?: Response) {
+  getMulterFileFilter(storeAsFile = true, res?: Response, stagingDirectory?: string) {
     return multer({
       storage: storeAsFile
         ? observePrinterUploadStorage(
-            diskStorage({ destination: join(getMediaPath(), AppConstants.defaultFileUploadsStorage) }),
+            diskStorage({
+              destination: stagingDirectory ?? join(getMediaPath(), AppConstants.defaultFileUploadsStorage),
+            }),
             res,
           )
         : memoryStorage(),

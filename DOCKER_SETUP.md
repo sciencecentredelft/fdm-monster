@@ -281,3 +281,13 @@ Backup restoration loses later changes.
   `RequestComplete: false` means Node did not receive the complete HTTP message.
   The diagnostic entries omit filenames, credentials, and file contents. Remove
   the override and recreate the container when finished.
+- **Try staging incoming printer uploads outside the media volume:**
+  Set `PRINTER_UPLOAD_STAGE_IN_TMP=true` in `.env` and rebuild/recreate the
+  service. This writes each printer upload to a private directory under the
+  container's `/tmp` instead of `/app/media/file-uploads`. The request's staging
+  directory is removed when processing exits; recreating the container also
+  discards any staging data left by an abrupt shutdown. Allow enough space in
+  Docker's writable storage for in-progress uploads. Permanent storage is still
+  on the media volume and may require a cross-filesystem copy. Shared-storage
+  uploads and all timeouts are unchanged. Remove the setting and recreate the
+  service to return printer uploads to the media volume.
